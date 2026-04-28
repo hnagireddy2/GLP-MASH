@@ -3,7 +3,7 @@ title: "HRP_263_GLP-1_MASH_Progression_Model_VOI"
 output:
   pdf_document:
     latex_engine: xelatex
-date: "03-13-2026"
+date: "04-27-2026"
 ---
 
 ```{r}
@@ -287,6 +287,162 @@ p_prog_month <- list(
   PostLT_Death  = rate_to_prob(0.036, cycle_length)
 )
 ```
+
+```{r}
+#############################################################
+###################    TREATMENT EFFECTS   ##################
+#############################################################
+
+treatments <- c("LSM","Semaglutide")
+all_strat_labels <- c(
+  "LSM",
+  "Sema 72w (Age 12)",
+  "Sema 72w (Age 18)"
+)
+
+## Semaglutide progression effect (vs LSM)
+rr_sema_progress <- 0.6097
+
+## Semaglutide regression effect (vs LSM) 
+rr_sema_regress  <- 1.5625
+
+rr_regress <- c(
+  LSM         = 1.0,
+  Semaglutide = rr_sema_regress
+)
+
+rr_progress <- c(
+  LSM         = 1.0,
+  Semaglutide = rr_sema_progress
+)
+```
+
+```{r}
+#############################################################
+######################## CYCLE TRANSITION ###################
+#############################################################
+
+build_cycle_P <- function(rr_regress_now, rr_progress_now, age_t,
+                          p_prog_month_local = p_prog_month) {
+  
+  P <- matrix(0, n_states, n_states, dimnames=list(v_states,v_states))
+
+### Fibrosis progression — progression RR applies only to F2->F3
+P["F0","F1"]    <- clip01(p_prog_month_local$F0_F1)                     
+P["F1","F2"]    <- clip01(p_prog_month_local$F1_F2)                     
+P["F2","F3"]    <- clip01(p_prog_month_local$F2_F3 * rr_progress_now)   
+P["F3","F4_CC"] <- clip01(p_prog_month_local$F3_F4)                     
+
+### Fibrosis regression — regression RR applies to F2->F1 and F3->F2
+P["F1","F0"]    <- clip01(p_prog_month_local$F1_F0)                     
+P["F2","F1"]    <- clip01(p_prog_month_local$F2_F1 * rr_regress_now)    
+P["F3","F2"]    <- clip01(p_prog_month_local$F3_F2 * rr_regress_now)    
+P["F4_CC","F3"] <- clip01(p_prog_month_local$F4_F3)                                 
+  
+  ### Advanced liver routes 
+  P["F3","HCC"]    <- clip01(p_prog_month_local$F3_HCC)
+  P["F4_CC","HCC"] <- clip01(p_prog_month_local$F4_HCC)
+  P["F4_CC","DCC"] <- clip01(p_prog_month_local$F4_DCC)
+  P["DCC","HCC"]   <- clip01(p_prog_month_local$DCC_HCC)
+  
+  ### Death from DC / HCC / LT / Post-LT
+  P["DCC","Dead"]     <- clip01(p_prog_month_local$DCC_Death)
+  P["HCC","Dead"]     <- clip01(p_prog_month_local$HCC_Death)
+  P["LT_Y1","Dead"]   <- clip01(p_prog_month_local$LT_Death)
+  P["LT_Y1_P","Dead"] <- clip01(p_prog_month_local$LT_Death)
+  P["Post_LT","Dead"] <- clip01(p_prog_month_local$PostLT_Death)  
+  
+  ### Liver transplant
+  P["F4_CC","LT_Y1"] <- clip01(p_prog_month_local$F4_LT)
+  P["DCC","LT_Y1"]   <- clip01(p_prog_month_local$DCC_LT)
+  P["HCC","LT_Y1"]   <- clip01(p_prog_month_local$HCC_LT)
+  
+  ### LT → Post-LT
+  P["LT_Y1","Post_LT"]   <- clip01(p_prog_month_local$LT1_to_PostLT)
+  P["LT_Y1_P","Post_LT"] <- clip01(p_prog_month_local$LT1P_to_PostLT)
+  P
+}
+```
+
+```{r}
+##############################################################
+################### BUILD 4D TRANSITION ARRAY ################
+##############################################################
+
+build_a_P <- function(rr_reg, rr_prog,
+                      p_prog_month_local = p_prog_month,
+                      treat_dur_cycles   = NULL,
+                      treat_start_cycles = NULL) {
+
+  if(is.null(treat_dur_cycles)){
+    treat_dur_cycles <- base_treat_dur_cycles
+  }
+  # Default: treatment starts at cycle 1 for all strategies
+  if(is.null(treat_start_cycles)){
+    treat_start_cycles <- setNames(rep(1L, length(treatments)), treatments)
+  }
+
+  a_P <- array(0,
+               dim=c(n_states,n_states,n_cycles,length(treatments)),
+               dimnames=list(v_states,v_states,1:n_cycles,treatments))
+
+  for(stg in treatments){
+    
+    dur_stg   <- treat_dur_cycles[stg]
+    start_stg <- treat_start_cycles[stg]
+
+    for(t in 1:n_cycles){
+
+      age_t <- age_start + (t-1)*cycle_length
+
+      # Apply treatment RR between start_stg and start_stg + dur_stg - 1
+      # Default: start_stg = 1 
+      if(dur_stg > 0 && t >= start_stg && t < (start_stg + dur_stg)){
+        rrreg <- rr_reg[stg]
+        rrprog<- rr_prog[stg]
+      } else {
+        rrreg <- 1.0
+        rrprog<- 1.0
+      }
+
+      P <- build_cycle_P(rrreg, rrprog, age_t, p_prog_month_local)
+
+      ### Add age-specific background mortality 
+      p_bg_t <- v_p_bg_month[t]
+
+      for (s in v_states[v_states != "Dead"]) {
+        base_p_death   <- P[s, "Dead"]
+        # Combine baseline disease-specific prob with background mortality
+        p_total_death  <- 1 - (1 - base_p_death) * (1 - p_bg_t)
+        P[s, "Dead"]   <- clip01(p_total_death)
+      }
+
+      # Dead 
+      P["Dead",]       <- 0
+      P["Dead","Dead"] <- 1
+
+      ### Stay probabilities
+      for(s in v_states){
+        if(s != "Dead"){
+          row_sum <- sum(P[s,])
+          if(row_sum >= 1){
+            # rescale non-self transitions to sum to 1
+            P[s,] <- P[s,] / row_sum
+          } else {
+            P[s,s] <- 1 - row_sum
+          }
+        }
+      }
+
+      P <- row_normalize(P)
+      a_P[,,t,stg] <- P
+    }
+  }
+
+  a_P
+}
+```
+
 ```{r}
 #############################################################
 ####################### CALIBRATION #########################
@@ -366,7 +522,6 @@ run_single_start <- function(p_prog_local, start_state) {
   v0 <- setNames(rep(0, n_states), v_states)
   v0[start_state] <- 1
 
-  # Build full 4D array with no treatment effect (RR = 1 for all)
   aP <- build_a_P(
     rr_reg             = c(LSM = 1, Semaglutide = 1),
     rr_prog            = c(LSM = 1, Semaglutide = 1),
@@ -386,10 +541,6 @@ run_single_start <- function(p_prog_local, start_state) {
 }
 
 # ---- 6. Predicted proportion with fibrosis regression at week 72 ----
-# Regression definition:
-#   F2 starter (31.3%) regresses if ending in F0 or F1
-#   F3 starter (68.7%) regresses if ending in F0, F1, or F2
-# Single-start runs keep F2 and F3 trajectories separable
 predict_regression <- function(p_prog_local) {
   final_F2 <- run_single_start(p_prog_local, "F2")
   final_F3 <- run_single_start(p_prog_local, "F3")
@@ -411,7 +562,7 @@ predict_regression <- function(p_prog_local) {
        p_reg_F3    = p_reg_F3)
 }
 
-# ---- 7. Loop through all candidate sets ----
+# ---- 7. Calibration loop: fibrosis regression ----
 results <- data.frame(
   set        = character(),
   p_reg_F2   = numeric(),
@@ -443,18 +594,17 @@ for (nm in names(candidate_sets)) {
   ))
 }
 
-cat("\n========== ESSENCE Calibration Results ==========\n")
+cat("\n========== ESSENCE Calibration: Fibrosis Regression ==========\n")
 cat("Observed regressions (true):         59 / 266\n")
 cat("Observed regressions (missing = non-responder): 50 / 266\n\n")
 print(results, row.names = FALSE)
 
 # ---- 8. Pick the best-fitting parameter set ----
-# Select the set whose predicted regression count most closely matches the missing-as-non-responder count of 50
 results$diff_50 <- round(results$expected_n - 50, 1)
 best <- results$set[which.min(abs(results$diff_50))]
 cat("\nBest-fitting parameter set (closest to 50):", best, "\n")
 
-# ---- 9. Plot ----
+# ---- 9. Plot: regression calibration ----
 library(ggplot2)
 results$set <- factor(results$set,
                       levels = c("obs_low", "obs", "obs_high",
@@ -481,18 +631,51 @@ best_annual <- candidate_sets[[best]]
 p_prog_month <- build_p_prog_from_annual(best_annual, p_prog_month)
 
 cat("\nFibrosis transitions in p_prog_month now set to '", best,
-    "' from the grid search.\n", sep = "")
+    "' from the calibration.\n", sep = "")
+
+
+#############################################################
+############### VALIDATION: F2 PROGRESSION ##################
+#############################################################
+# ESSENCE Supplementary Table S6 (Sanyal et al. 2025):
+# Progression of liver fibrosis in participants with fibrosis stage F2 at baseline — Placebo: 29 (35.6%), N=81 
+# Note: counts include multiple reference-based imputation for missing week-72 biopsies (Table S6 footnote).
+
+N_F2_placebo    <- 81
+obs_progress_F2 <- 29
+
+predict_progression_F2 <- function(p_prog_local) {
+  final_F2 <- run_single_start(p_prog_local, "F2")
+  p_prog   <- sum(final_F2[c("F3", "F4_CC", "DCC", "HCC",
+                              "LT_Y1", "LT_Y1_P", "Post_LT")])
+
+  expected_n <- p_prog * N_F2_placebo
+  ci_lo <- qbinom(0.025, N_F2_placebo, p_prog)
+  ci_hi <- qbinom(0.975, N_F2_placebo, p_prog)
+
+  list(p_prog = p_prog, expected_n = expected_n,
+       ci_lo = ci_lo, ci_hi = ci_hi)
+}
+
+pp_chosen   <- build_p_prog_from_annual(candidate_sets[[best]], p_prog_month)
+val_F2_prog <- predict_progression_F2(pp_chosen)
+
+cat("\n=== Validation: F2 Progression in ESSENCE Placebo ===\n")
+cat("Source:    Table S6, Sanyal et al. NEJM 2025 supplement\n")
+cat("Observed:  ", obs_progress_F2, "/", N_F2_placebo, "\n", sep = "")
+cat("Predicted: ", round(val_F2_prog$expected_n, 1),
+    " (95% CI: ", val_F2_prog$ci_lo, "-", val_F2_prog$ci_hi, ")\n", sep = "")
+
 ```
 ```{r}
-#############################################################
-####################### VALIDATION ##########################
-#############################################################
+###############################################################
+####### TIME-TO-SEVERE-DISEASE VALIDATION OF ALL STATES #######
+###############################################################
 
 target_hagstrom <- data.frame(
   start_stage  = c("F0", "F1", "F2", "F3", "F4_CC"),
   time_low     = c(25, 20, 13, 7,  3),
-  time_high    = c(35, 30, 22, 13, 7),
-  source       = "Hagstrom et al. J Hepatol 2017"
+  time_high    = c(35, 30, 22, 13, 7)
 )
 
 # ---- Run single-stage cohort, find time to 10% severe ----
@@ -519,10 +702,12 @@ time_to_severe <- function(start_state, threshold = 0.10) {
     m_tr[t + 1, ] <- m_tr[t, ] %*% aP_val[,,t,"LSM"]
   }
   
-  # Cumulative proportion reaching "severe" (any liver-disease state)
-  severe_states <- c("DCC", "HCC", "LT_Y1", "LT_Y1_P", "Post_LT")
-  pct_severe    <- rowSums(m_tr[, severe_states])
-  
+severe_states <- c("DCC", "HCC", "LT_Y1", "LT_Y1_P", "Post_LT")
+
+# Cumulative: 1 minus those still in fibrosis states (never reached severe)
+fibrosis_states <- c("F0", "F1", "F2", "F3", "F4_CC")
+pct_severe <- 1 - rowSums(m_tr[, fibrosis_states])
+
   # Find first cycle where pct_severe >= threshold
   cycle_at_threshold <- which(pct_severe >= threshold)[1]
   
@@ -615,14 +800,13 @@ plot_severe_trajectory <- function() {
     labs(title = "Time-to-Severe-Disease by Baseline Fibrosis Stage",
          subtitle = "Each curve: cohort starting 100% at the indicated stage, no treatment",
          color = "Baseline Stage") +
-    theme_bw(base_size = txtsize) +
+    theme_bw(base_size = 13) +
     theme(legend.position = "right")
 }
 
 plot_severe_trajectory()
 ```
 ```{r}
-{r}
 #############################################################
 ######## OWSA bounds: Le et al. observational range #########
 #############################################################
@@ -632,158 +816,6 @@ p_prog_month_le_low  <- build_p_prog_from_annual(candidate_sets$obs_low,
                                                  p_prog_month)
 p_prog_month_le_high <- build_p_prog_from_annual(candidate_sets$obs_high,
                                                  p_prog_month)
-```
-```{r}
-#############################################################
-###################    TREATMENT EFFECTS   ##################
-#############################################################
-
-treatments <- c("LSM","Semaglutide")
-all_strat_labels <- c(
-  "LSM",
-  "Sema 72w (Age 12)",
-  "Sema 72w (Age 18)"
-)
-
-## Semaglutide progression effect (vs LSM)
-rr_sema_progress <- 0.6097
-
-## Semaglutide regression effect (vs LSM) 
-rr_sema_regress  <- 1.5625
-
-rr_regress <- c(
-  LSM         = 1.0,
-  Semaglutide = rr_sema_regress
-)
-
-rr_progress <- c(
-  LSM         = 1.0,
-  Semaglutide = rr_sema_progress
-)
-```
-```{r}
-#############################################################
-######################## CYCLE TRANSITION ###################
-#############################################################
-
-build_cycle_P <- function(rr_regress_now, rr_progress_now, age_t,
-                          p_prog_month_local = p_prog_month) {
-  
-  P <- matrix(0, n_states, n_states, dimnames=list(v_states,v_states))
-
-### Fibrosis progression — progression RR applies only to F2->F3
-P["F0","F1"]    <- clip01(p_prog_month_local$F0_F1)                     
-P["F1","F2"]    <- clip01(p_prog_month_local$F1_F2)                     
-P["F2","F3"]    <- clip01(p_prog_month_local$F2_F3 * rr_progress_now)   
-P["F3","F4_CC"] <- clip01(p_prog_month_local$F3_F4)                     
-
-### Fibrosis regression — regression RR applies to F2->F1 and F3->F2
-P["F1","F0"]    <- clip01(p_prog_month_local$F1_F0)                     
-P["F2","F1"]    <- clip01(p_prog_month_local$F2_F1 * rr_regress_now)    
-P["F3","F2"]    <- clip01(p_prog_month_local$F3_F2 * rr_regress_now)    
-P["F4_CC","F3"] <- clip01(p_prog_month_local$F4_F3)                                 
-  
-  ### Advanced liver routes 
-  P["F3","HCC"]    <- clip01(p_prog_month_local$F3_HCC)
-  P["F4_CC","HCC"] <- clip01(p_prog_month_local$F4_HCC)
-  P["F4_CC","DCC"] <- clip01(p_prog_month_local$F4_DCC)
-  P["DCC","HCC"]   <- clip01(p_prog_month_local$DCC_HCC)
-  
-  ### Death from DC / HCC / LT / Post-LT
-  P["DCC","Dead"]     <- clip01(p_prog_month_local$DCC_Death)
-  P["HCC","Dead"]     <- clip01(p_prog_month_local$HCC_Death)
-  P["LT_Y1","Dead"]   <- clip01(p_prog_month_local$LT_Death)
-  P["LT_Y1_P","Dead"] <- clip01(p_prog_month_local$LT_Death)
-  P["Post_LT","Dead"] <- clip01(p_prog_month_local$PostLT_Death)  
-  
-  ### Liver transplant
-  P["F4_CC","LT_Y1"] <- clip01(p_prog_month_local$F4_LT)
-  P["DCC","LT_Y1"]   <- clip01(p_prog_month_local$DCC_LT)
-  P["HCC","LT_Y1"]   <- clip01(p_prog_month_local$HCC_LT)
-  
-  ### LT → Post-LT
-  P["LT_Y1","Post_LT"]   <- clip01(p_prog_month_local$LT1_to_PostLT)
-  P["LT_Y1_P","Post_LT"] <- clip01(p_prog_month_local$LT1P_to_PostLT)
-  P
-}
-```
-```{r}
-##############################################################
-################### BUILD 4D TRANSITION ARRAY ################
-##############################################################
-
-build_a_P <- function(rr_reg, rr_prog,
-                      p_prog_month_local = p_prog_month,
-                      treat_dur_cycles   = NULL,
-                      treat_start_cycles = NULL) {
-
-  if(is.null(treat_dur_cycles)){
-    treat_dur_cycles <- base_treat_dur_cycles
-  }
-  # Default: treatment starts at cycle 1 for all strategies
-  if(is.null(treat_start_cycles)){
-    treat_start_cycles <- setNames(rep(1L, length(treatments)), treatments)
-  }
-
-  a_P <- array(0,
-               dim=c(n_states,n_states,n_cycles,length(treatments)),
-               dimnames=list(v_states,v_states,1:n_cycles,treatments))
-
-  for(stg in treatments){
-    
-    dur_stg   <- treat_dur_cycles[stg]
-    start_stg <- treat_start_cycles[stg]
-
-    for(t in 1:n_cycles){
-
-      age_t <- age_start + (t-1)*cycle_length
-
-      # Apply treatment RR between start_stg and start_stg + dur_stg - 1
-      # Default: start_stg = 1 
-      if(dur_stg > 0 && t >= start_stg && t < (start_stg + dur_stg)){
-        rrreg <- rr_reg[stg]
-        rrprog<- rr_prog[stg]
-      } else {
-        rrreg <- 1.0
-        rrprog<- 1.0
-      }
-
-      P <- build_cycle_P(rrreg, rrprog, age_t, p_prog_month_local)
-
-      ### Add age-specific background mortality 
-      p_bg_t <- v_p_bg_month[t]
-
-      for (s in v_states[v_states != "Dead"]) {
-        base_p_death   <- P[s, "Dead"]
-        # Combine baseline disease-specific prob with background mortality
-        p_total_death  <- 1 - (1 - base_p_death) * (1 - p_bg_t)
-        P[s, "Dead"]   <- clip01(p_total_death)
-      }
-
-      # Dead 
-      P["Dead",]       <- 0
-      P["Dead","Dead"] <- 1
-
-      ### Stay probabilities
-      for(s in v_states){
-        if(s != "Dead"){
-          row_sum <- sum(P[s,])
-          if(row_sum >= 1){
-            # rescale non-self transitions to sum to 1
-            P[s,] <- P[s,] / row_sum
-          } else {
-            P[s,s] <- 1 - row_sum
-          }
-        }
-      }
-
-      P <- row_normalize(P)
-      a_P[,,t,stg] <- P
-    }
-  }
-
-  a_P
-}
 ```
 ```{r}
 #############################################################
@@ -885,6 +917,7 @@ summarize_outcomes <- function(trace, drug_cost_per_year,
 }
 
 ```
+
 ```{r}
 #############################################################
 ################# SUMMARIZE STRATEGIES ######################
@@ -928,6 +961,7 @@ icer_vs_lsm <- function(res_df){
   dCost / dQALY
 }
 ```
+
 ```{r}
 #############################################################
 ################ GENERIC ICER FUNCTION ######################
@@ -967,6 +1001,7 @@ run_owsa_icer <- function(rr_regress_vec      = rr_regress,
 }
 
 ```
+
 ```{r}
 #############################################################
 ############# One-Way Sensitivity Analysis ##################
@@ -974,7 +1009,7 @@ run_owsa_icer <- function(rr_regress_vec      = rr_regress,
 
 owsa_params <- list()
 
-###### 2. Transition probabilities (from obs. data)
+###### 1. Transition probabilities (from obs. data)
 
 icer_progobs_lo <- run_owsa_icer(
   p_prog_month_local = p_prog_month_le_low
@@ -987,7 +1022,7 @@ owsa_params[["baseline_transitions"]] <- c(
   high = icer_progobs_hi
 )
 
-###### 3. Semaglutide efficacy (regression RR) – base vs trial RR
+###### 2. Semaglutide efficacy (regression RR) – base vs trial RR
 rr_reg_base <- rr_regress["Semaglutide"]
 rr_reg_SA   <- 1.728240524
 
@@ -1001,7 +1036,7 @@ icer_sema_hi <- run_owsa_icer(rr_regress_vec = rr_reg_hi,
 owsa_params[["sema_efficacy"]] <- c(low = icer_sema_lo,
                                        high = icer_sema_hi)
 
-###### 4. State-specific medical costs (0.75x vs 1.25x)
+###### 3. State-specific medical costs (0.75x vs 1.25x)
 cost_lo <- costs_base * 0.75
 cost_hi <- costs_base * 1.25
 
@@ -1010,7 +1045,7 @@ icer_cost_hi <- run_owsa_icer(cost_vector = cost_hi)
 owsa_params[["state_costs"]] <- c(low = icer_cost_lo,
                                      high = icer_cost_hi)
 
-###### 4b. LT complication costs (prob-weighted, low/high bounds)
+###### 4. LT complication costs (prob-weighted, low/high bounds)
 costs_lt_lo <- costs_base
 costs_lt_hi <- costs_base
 for (st in c("LT_Y1","LT_Y1_P")) {
