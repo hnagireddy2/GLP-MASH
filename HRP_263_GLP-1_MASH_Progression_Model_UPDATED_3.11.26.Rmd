@@ -236,8 +236,8 @@ m_util_base <- build_util_matrix(v_util_age_base, qaly_dec_base)
 #############################################################
 # Baseline MONTHLY transition probabilities.
 # Fibrosis transitions (F0-F4) are placeholders here; they will be
-# replaced by the best of the candidate parameter sets determined by the calibration below.
-# Transitions to HCC, DCC, LT, death are fixed inputs and held constant throughout.
+# Replaced by the candidate parameter set determined to be of best fit
+# Transitions to HCC, DCC, LT, death are fixed inputs here
 
 # Function for annual probability -> monthly probability
 annual_to_month <- function(p_annual) {
@@ -449,11 +449,17 @@ build_a_P <- function(rr_reg, rr_prog,
 #############################################################
 
 # ---- 1. ESSENCE trial parameters ----
-N_trial       <- 266
-obs_regress   <- 59        # "true" observed regressions
-obs_regress_c <- 50        # secondary: missing-biopsy-as-non-responder
-weeks_trial   <- 72
-n_cyc_trial   <- round(weeks_trial / 52 / cycle_length)  
+# Biopsy-confirmed counts from Sanyal et al. 2025 supplement
+#   Placebo fibrosis improvement: 50 responders, 172 non-responders
+#   Total with week-72 biopsies: 222
+N_trial_biopsy <- 222
+obs_regress    <- 50
+weeks_trial    <- 72
+n_cyc_trial    <- round(weeks_trial / 52 / cycle_length)
+
+# ESSENCE mean age (Table S2): 56.0 years
+age_essence     <- 56.0
+cycle_offset_essence <- round((age_essence - age_start) / cycle_length)
 
 v_init_essence <- c(F0 = 0, F1 = 0, F2 = 0.313, F3 = 0.687, F4_CC = 0,
                     DCC = 0, HCC = 0, LT_Y1 = 0, LT_Y1_P = 0,
@@ -518,7 +524,8 @@ build_p_prog_from_annual <- function(vals_annual, p_prog_template) {
 }
 
 # ---- 5. Run ESSENCE cohort from a single starting state ----
-run_single_start <- function(p_prog_local, start_state) {
+run_single_start <- function(p_prog_local, start_state, 
+                             cycle_offset = cycle_offset_essence) {
   v0 <- setNames(rep(0, n_states), v_states)
   v0[start_state] <- 1
 
@@ -535,7 +542,7 @@ run_single_start <- function(p_prog_local, start_state) {
   m_tr[1, ] <- v0
 
   for (t in 1:n_cyc_trial) {
-    m_tr[t + 1, ] <- m_tr[t, ] %*% aP[,,t,"LSM"]
+    m_tr[t + 1, ] <- m_tr[t, ] %*% aP[,,cycle_offset + t,"LSM"]
   }
   m_tr[n_cyc_trial + 1, ]
 }
@@ -548,11 +555,11 @@ predict_regression <- function(p_prog_local) {
   p_reg_F2 <- sum(final_F2[c("F0", "F1")])           
   p_reg_F3 <- sum(final_F3[c("F0", "F1", "F2")])    
 
-  p_reg_total <- 0.313 * p_reg_F2 + 0.687 * p_reg_F3
-  expected_n  <- p_reg_total * N_trial
+p_reg_total <- 0.313 * p_reg_F2 + 0.687 * p_reg_F3
+  expected_n  <- p_reg_total * N_trial_biopsy
 
-  ci_lo <- qbinom(0.025, N_trial, p_reg_total)
-  ci_hi <- qbinom(0.975, N_trial, p_reg_total)
+  ci_lo <- qbinom(0.025, N_trial_biopsy, p_reg_total)
+  ci_hi <- qbinom(0.975, N_trial_biopsy, p_reg_total)
 
   list(p_reg_total = p_reg_total,
        expected_n  = expected_n,
@@ -571,9 +578,8 @@ results <- data.frame(
   expected_n = numeric(),
   ci_lo      = integer(),
   ci_hi      = integer(),
-  hits_59    = logical(),
   hits_50    = logical(),
-  diff_59    = numeric(),
+  diff_50    = numeric(),
   stringsAsFactors = FALSE
 )
 
@@ -588,21 +594,16 @@ for (nm in names(candidate_sets)) {
     expected_n = round(out$expected_n, 1),
     ci_lo      = out$ci_lo,
     ci_hi      = out$ci_hi,
-    hits_59    = (59 >= out$ci_lo) & (59 <= out$ci_hi),
     hits_50    = (50 >= out$ci_lo) & (50 <= out$ci_hi),
-    diff_59    = round(out$expected_n - 59, 1)
+    diff_50    = round(out$expected_n - 50, 1)
   ))
 }
 
-cat("\n========== ESSENCE Calibration: Fibrosis Regression ==========\n")
-cat("Observed regressions (true):         59 / 266\n")
-cat("Observed regressions (missing = non-responder): 50 / 266\n\n")
-print(results, row.names = FALSE)
-
 # ---- 8. Pick the best-fitting parameter set ----
-results$diff_50 <- round(results$expected_n - 50, 1)
-best <- results$set[which.min(abs(results$diff_50))]
-cat("\nBest-fitting parameter set (closest to 50):", best, "\n")
+# Select among central estimates (Le et al. RCT and observational means)
+eligible <- results[results$set %in% c("obs", "trial"), ]
+best <- eligible$set[which.min(abs(eligible$diff_50))]
+cat("\nBest-fitting parameter set:", best, "\n")
 
 # ---- 9. Plot: regression calibration ----
 library(ggplot2)
@@ -614,15 +615,12 @@ ggplot(results, aes(x = set, y = expected_n)) +
   geom_point(size = 3, color = "#0072B2") +
   geom_errorbar(aes(ymin = ci_lo, ymax = ci_hi), width = 0.2,
                 color = "#0072B2", linewidth = 0.8) +
-  geom_hline(yintercept = 59, linetype = "dashed", linewidth = 0.8) +
-  geom_hline(yintercept = 50, linetype = "dotted",  linewidth = 0.6) +
-  annotate("text", x = 6.3, y = 59, label = "True = 59",
-           hjust = 0, size = 3.5) +
-  annotate("text", x = 6.3, y = 50, label = "missing as non-responders = 50",
+  geom_hline(yintercept = 50, linetype = "dashed", linewidth = 0.8) +
+  annotate("text", x = 6.3, y = 50, label = "Observed = 50",
            hjust = 0, size = 3.5) +
   labs(x     = "Transition Probabilities Source",
-       y     = "Number of Individuals\nwith Fibrosis Regression",
-       title = "ESSENCE Calibration: Candidate Parameter Sets vs Observed") +
+       y     = "Predicted Regressions (N = 222)",
+       title = "ESSENCE Calibration: Biopsy-Confirmed Fibrosis Regression") +
   theme_bw(base_size = 13) +
   theme(plot.margin = margin(5, 60, 5, 5))
 
@@ -632,8 +630,9 @@ p_prog_month <- build_p_prog_from_annual(best_annual, p_prog_month)
 
 cat("\nFibrosis transitions in p_prog_month now set to '", best,
     "' from the calibration.\n", sep = "")
+```
 
-
+```{r}
 #############################################################
 ############### VALIDATION: F2 PROGRESSION ##################
 #############################################################
@@ -642,10 +641,11 @@ cat("\nFibrosis transitions in p_prog_month now set to '", best,
 # Note: counts include multiple reference-based imputation for missing week-72 biopsies (Table S6 footnote).
 
 N_F2_placebo    <- 81
-obs_progress_F2 <- 29
+obs_progress_F2 <- 29    
 
 predict_progression_F2 <- function(p_prog_local) {
-  final_F2 <- run_single_start(p_prog_local, "F2")
+  final_F2 <- run_single_start(p_prog_local, "F2",
+                                cycle_offset = cycle_offset_essence)
   p_prog   <- sum(final_F2[c("F3", "F4_CC", "DCC", "HCC",
                               "LT_Y1", "LT_Y1_P", "Post_LT")])
 
@@ -681,6 +681,9 @@ target_hagstrom <- data.frame(
 # ---- Run single-stage cohort, find time to 10% severe ----
 # Severe = DCC + HCC + LT_Y1 + LT_Y1_P + Post_LT + Dead-from-liver
 
+age_hagstrom     <- 48.2
+cycle_offset_hagstrom <- round((age_hagstrom - age_start) / cycle_length)
+
 time_to_severe <- function(start_state, threshold = 0.10) {
   
   v_init_val <- setNames(rep(0, n_states), v_states)
@@ -694,15 +697,15 @@ time_to_severe <- function(start_state, threshold = 0.10) {
     treat_start_cycles = c(LSM = 1L, Semaglutide = 1L)
   )
   
-  m_tr <- matrix(0, nrow = n_cycles + 1, ncol = n_states,
-                 dimnames = list(NULL, v_states))
+  max_cyc <- n_cycles - cycle_offset_hagstrom
+  
+  m_tr <- matrix(0, nrow = max_cyc + 1, ncol = n_states,
+               dimnames = list(NULL, v_states))
   m_tr[1, ] <- v_init_val
   
-  for (t in 1:n_cycles) {
-    m_tr[t + 1, ] <- m_tr[t, ] %*% aP_val[,,t,"LSM"]
+  for (t in 1:max_cyc) {
+    m_tr[t + 1, ] <- m_tr[t, ] %*% aP_val[,,cycle_offset_hagstrom + t,"LSM"]
   }
-  
-severe_states <- c("DCC", "HCC", "LT_Y1", "LT_Y1_P", "Post_LT")
 
 # Cumulative: 1 minus those still in fibrosis states (never reached severe)
 fibrosis_states <- c("F0", "F1", "F2", "F3", "F4_CC")
@@ -715,9 +718,7 @@ pct_severe <- 1 - rowSums(m_tr[, fibrosis_states])
     return(NA_real_)   # cohort never reaches threshold within horizon
   }
   
-  # Convert cycle to years
-  years_at_threshold <- (cycle_at_threshold - 1) * cycle_length
-  years_at_threshold
+  (cycle_at_threshold - 1) * cycle_length
 }
 
 # ---- Run Hagstrom validation for each starting stage ----
@@ -764,20 +765,22 @@ plot_severe_trajectory <- function() {
       treat_start_cycles = c(LSM = 1L, Semaglutide = 1L)
     )
     
-    m_tr <- matrix(0, nrow = n_cycles + 1, ncol = n_states,
+    max_cyc <- n_cycles - cycle_offset_hagstrom
+    m_tr <- matrix(0, nrow = max_cyc + 1, ncol = n_states,
                    dimnames = list(NULL, v_states))
     m_tr[1, ] <- v_init_val
     
-    for (t in 1:n_cycles) {
-      m_tr[t + 1, ] <- m_tr[t, ] %*% aP_val[,,t,"LSM"]
+    for (t in 1:max_cyc) {
+      m_tr[t + 1, ] <- m_tr[t, ] %*%
+        aP_val[,,cycle_offset_hagstrom + t,"LSM"]
     }
     
     severe_states <- c("DCC", "HCC", "LT_Y1", "LT_Y1_P", "Post_LT")
-    pct_severe    <- rowSums(m_tr[, severe_states])
+    pct_severe <- rowSums(m_tr[1:(max_cyc + 1), severe_states])
     
     data.frame(
       Stage      = stg,
-      Year       = (0:n_cycles) * cycle_length,
+      Year       = (0:max_cyc) * cycle_length,
       PctSevere  = pct_severe
     )
   })
@@ -791,7 +794,7 @@ plot_severe_trajectory <- function() {
     annotate("text", x = 35, y = 0.105, label = "10% threshold",
              hjust = 0, size = 3.5, color = "gray40") +
     scale_x_continuous("Years from baseline", breaks = seq(0, 40, by = 5)) +
-    scale_y_continuous("Cumulative proportion in severe disease",
+    scale_y_continuous("Cumulative proportion reaching severe disease",
                        labels = percent_format(), limits = c(0, 0.5)) +
     scale_color_manual(
       values = c(F0 = "#56B4E9", F1 = "#0072B2", F2 = "#009E73",
