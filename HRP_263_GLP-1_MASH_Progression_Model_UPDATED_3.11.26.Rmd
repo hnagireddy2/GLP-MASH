@@ -674,9 +674,12 @@ cat("Predicted: ", round(val_F2_prog$expected_n, 1),
 
 target_hagstrom <- data.frame(
   start_stage  = c("F0", "F1", "F2", "F3", "F4_CC"),
-  time_low     = c(25, 20, 13, 7,  3),
-  time_high    = c(35, 30, 22, 13, 7)
+  point_estimates = c(30.5, 35.6, 19.4, 6.0, 5.6),
+  time_low     = c(21.5,  25.6,  9.3,  2.3,  0.9),
+  time_high    = c(39.6,  45.4, 29.5,  9.6, 10.3),
+  endpoint     = c("Severe Disease", "Severe Disease", "Severe Disease", "Severe Disease", "Decompensation")
 )
+# Note: the F4 endpoint is decompensation specifically (not the full composite) 
 
 # ---- Run single-stage cohort, find time to 10% severe ----
 # Severe = DCC + HCC + LT_Y1 + LT_Y1_P + Post_LT + Dead-from-liver
