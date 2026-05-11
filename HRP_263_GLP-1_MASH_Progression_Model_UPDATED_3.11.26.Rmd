@@ -706,13 +706,22 @@ time_to_severe <- function(start_state, threshold = 0.10) {
                dimnames = list(NULL, v_states))
   m_tr[1, ] <- v_init_val
   
+  # Make severe states absorbing
+  for (s in c("DCC", "HCC", "LT_Y1", "LT_Y1_P", "Post_LT")) {
+    for (cyc in 1:dim(aP_val)[3]) {
+      aP_val[s, , cyc, "LSM"] <- 0
+      aP_val[s, s, cyc, "LSM"] <- 1
+    }
+  }
+
+  # Run the Markov trace
   for (t in 1:max_cyc) {
     m_tr[t + 1, ] <- m_tr[t, ] %*% aP_val[,,cycle_offset_hagstrom + t,"LSM"]
   }
 
-# Cumulative: 1 minus those still in fibrosis states (never reached severe)
-fibrosis_states <- c("F0", "F1", "F2", "F3", "F4_CC")
-pct_severe <- 1 - rowSums(m_tr[, fibrosis_states])
+# Cumulative: 1 minus those still in fibrosis states (never reached severe), not including death
+severe_states <- c("DCC", "HCC", "LT_Y1", "LT_Y1_P", "Post_LT")
+pct_severe <- rowSums(m_tr[1:(max_cyc + 1), severe_states])
 
   # Find first cycle where pct_severe >= threshold
   cycle_at_threshold <- which(pct_severe >= threshold)[1]
@@ -773,11 +782,20 @@ plot_severe_trajectory <- function() {
                    dimnames = list(NULL, v_states))
     m_tr[1, ] <- v_init_val
     
-    for (t in 1:max_cyc) {
-      m_tr[t + 1, ] <- m_tr[t, ] %*%
-        aP_val[,,cycle_offset_hagstrom + t,"LSM"]
+    # Make severe states absorbing (once reached, stay counted)
+    for (s in c("DCC", "HCC", "LT_Y1", "LT_Y1_P", "Post_LT")) {
+      for (cyc in 1:dim(aP_val)[3]) {
+        aP_val[s, , cyc, "LSM"] <- 0
+        aP_val[s, s, cyc, "LSM"] <- 1
+      }
     }
-    
+
+    # Run the Markov trace
+    for (t in 1:max_cyc) {
+      m_tr[t + 1, ] <- m_tr[t, ] %*% aP_val[,,cycle_offset_hagstrom + t,"LSM"]
+    }
+
+    # Count cumulative severe
     severe_states <- c("DCC", "HCC", "LT_Y1", "LT_Y1_P", "Post_LT")
     pct_severe <- rowSums(m_tr[1:(max_cyc + 1), severe_states])
     
