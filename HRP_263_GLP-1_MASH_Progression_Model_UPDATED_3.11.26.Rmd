@@ -896,13 +896,14 @@ summarize_outcomes <- function(trace, drug_cost_per_year,
   v_cost_state_annual <- trace %*% matrix(cost_vector[v_states], ncol=1)
   v_cost_state_cycle  <- v_cost_state_annual * cycle_length
 
-  # Drug cost while on treatment
-    # Conservative estimate: charge full annual cost for each calendar year the patient is treated (even if treatment ends partway through a year)
-    on_vec <- rep(0, n_cycles + 1)
-    if (treat_dur_cycles > 0) {
+  # Drug cost: charge monthly cost for each on-treatment cycle
+  cost_per_cycle <- drug_cost_per_year * cycle_length
+  on_vec <- rep(0, n_cycles + 1)
+  if (treat_dur_cycles > 0) {
     idx_end <- min(treat_dur_cycles, n_cycles + 1)
     on_vec[1:idx_end] <- 1
-     }
+  }
+  v_cost_drug_cycle <- on_vec * cost_per_cycle
 
     # Convert to "year of treatment"
     treat_year_marker <- ceiling(cumsum(on_vec) / 12)   
