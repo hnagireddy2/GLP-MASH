@@ -75,105 +75,9 @@ ggplot(icer_res, aes(x = Effect, y = Cost)) +
   theme_bw(base_size = 14) +
   theme(legend.position = "bottom")
 
-
-# ============================================================
-# EXTERNAL VALIDATION
-# ============================================================
-
-txtsize <- 13
-
-target_hcc_incidence  <- list(
-  annual_low  = 0.005,
-  annual_high = 0.030,
-  source      = "Kanwal et al. Gastroenterology 2022; Sanyal et al. NEJM 2021"
-)
-
-target_dcc_rate <- list(
-  annual_low  = 0.027,
-  annual_high = 0.066,
-  source      = "Sanyal et al. NEJM 2021; Le et al. CGH 2023"
-)
-
-target_dcc_mortality <- list(
-  annual_low  = 0.10,
-  annual_high = 0.25,
-  source      = "Ng et al. CGH 2023; D'Amico et al. J Hepatol 2014"
-)
-
 trace_lsm  <- traces_imm[["LSM"]]
 ages_trace <- age_start + (0:n_cycles) * cycle_length
-
-# ---- Target 1: Annual HCC incidence from F4 ----
-f4_window <- 100:200
-hcc_monthly <- mean(
-  diff(trace_lsm[f4_window, "HCC"]) /
-    pmax(trace_lsm[f4_window[-length(f4_window)], "F4_CC"], 1e-8)
-)
-hcc_incidence_annual <- rate_to_prob(prob_to_rate(hcc_monthly) * 12)
-
-cat("=== Target 1: Annual HCC incidence from F4 ===\n")
-cat("  Model predicted:  ", round(hcc_incidence_annual * 100, 2), "% /year\n")
-cat("  Literature range: ", target_hcc_incidence$annual_low * 100, "-",
-    target_hcc_incidence$annual_high * 100, "% /year\n")
-cat("  Source:", target_hcc_incidence$source, "\n\n")
-
-# ---- Target 2: Annual DCC rate from F4 ----
-dcc_monthly <- mean(
-  diff(trace_lsm[f4_window, "DCC"]) /
-    pmax(trace_lsm[f4_window[-length(f4_window)], "F4_CC"], 1e-8)
-)
-dcc_rate_annual <- rate_to_prob(prob_to_rate(dcc_monthly) * 12)
-
-cat("=== Target 2: Annual DCC rate from F4 ===\n")
-cat("  Model predicted:  ", round(dcc_rate_annual * 100, 2), "% /year\n")
-cat("  Literature range: ", target_dcc_rate$annual_low * 100, "-",
-    target_dcc_rate$annual_high * 100, "% /year\n")
-cat("  Source:", target_dcc_rate$source, "\n\n")
-
-# ---- Target 3: Annual mortality from DCC ----
-dcc_mort_annual <- rate_to_prob(prob_to_rate(p_prog_month$DCC_Death) * 12)
-
-cat("=== Target 3: Annual mortality from DCC ===\n")
-cat("  Model predicted:  ", round(dcc_mort_annual * 100, 1), "% /year\n")
-cat("  Literature range: ", target_dcc_mortality$annual_low * 100, "-",
-    target_dcc_mortality$annual_high * 100, "% /year\n")
-cat("  Source:", target_dcc_mortality$source, "\n\n")
-
-# ---- Validation summary table ----
-df_val_summary <- data.frame(
-  Target = c("Annual HCC incidence (F4)", "Annual DCC rate (F4)", "Annual mortality from DCC"),
-  Literature_Low = c(
-    paste0(target_hcc_incidence$annual_low  * 100, "%"),
-    paste0(target_dcc_rate$annual_low       * 100, "%"),
-    paste0(target_dcc_mortality$annual_low  * 100, "%")
-  ),
-  Literature_High = c(
-    paste0(target_hcc_incidence$annual_high * 100, "%"),
-    paste0(target_dcc_rate$annual_high      * 100, "%"),
-    paste0(target_dcc_mortality$annual_high * 100, "%")
-  ),
-  Model_Predicted = c(
-    paste0(round(hcc_incidence_annual * 100, 2), "%"),
-    paste0(round(dcc_rate_annual      * 100, 2), "%"),
-    paste0(round(dcc_mort_annual      * 100, 1), "%")
-  ),
-  Pass = c(
-    ifelse(hcc_incidence_annual >= target_hcc_incidence$annual_low &
-           hcc_incidence_annual <= target_hcc_incidence$annual_high, "PASS", "FAIL"),
-    ifelse(dcc_rate_annual      >= target_dcc_rate$annual_low &
-           dcc_rate_annual      <= target_dcc_rate$annual_high, "PASS", "FAIL"),
-    ifelse(dcc_mort_annual      >= target_dcc_mortality$annual_low &
-           dcc_mort_annual      <= target_dcc_mortality$annual_high, "PASS", "FAIL")
-  ),
-  Source = c(target_hcc_incidence$source, target_dcc_rate$source, target_dcc_mortality$source),
-  stringsAsFactors = FALSE
-)
-
-cat("\n============================================================\n")
-cat(" EXTERNAL VALIDATION SUMMARY\n")
-cat("============================================================\n")
-print(df_val_summary, row.names = FALSE)
-cat("============================================================\n\n")
+txtsize    <- 13
 
 # ---- Plot A: State occupancy over time ----
 df_trace_lsm <- as.data.frame(trace_lsm)
@@ -217,3 +121,8 @@ ggplot(df_dead, aes(x = Age, y = pct_dead)) +
   theme_bw(base_size = txtsize)
 
 cat("04_base_case.R complete.\n")
+
+row_sums <- rowSums(trace_lsm)
+cat("Min row sum:", min(row_sums), "\n")
+cat("Max row sum:", max(row_sums), "\n")
+cat("Any below 0.999?", any(row_sums < 0.999), "\n")
