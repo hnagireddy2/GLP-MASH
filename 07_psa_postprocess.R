@@ -238,3 +238,4 @@ plot(elc_all) +
   theme(legend.position  = "right",
         legend.text      = element_text(size = 8),
         legend.key.width = unit(1.5, "cm"))
+

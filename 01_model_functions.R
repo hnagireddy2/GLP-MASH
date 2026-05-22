@@ -1,27 +1,30 @@
 # 01_model_functions.R
 # Requires: source("00_parameters.R")
-# All reusable model functions. No execution.
 
 #############################################################
 ######################## CYCLE TRANSITION ###################
 #############################################################
 
+apply_rr <- function(p, rr) {
+  if (rr != 1.0) apply_rr_at_trial_timescale(p, rr) else p
+}
+
 build_cycle_P <- function(rr_regress_now, rr_progress_now, age_t,
                           p_prog_month_local = p_prog_month) {
   
   P <- matrix(0, n_states, n_states, dimnames=list(v_states,v_states))
-
+  
 ### Fibrosis progression — progression RR applies only to F2->F3
-P["F0","F1"]    <- clip01(p_prog_month_local$F0_F1)                     
-P["F1","F2"]    <- clip01(p_prog_month_local$F1_F2)                     
-P["F2","F3"]    <- clip01(p_prog_month_local$F2_F3 * rr_progress_now)   
-P["F3","F4_CC"] <- clip01(p_prog_month_local$F3_F4)                     
+  P["F0","F1"]    <- clip01(p_prog_month_local$F0_F1)
+  P["F1","F2"]    <- clip01(p_prog_month_local$F1_F2)
+  P["F2","F3"]    <- clip01(apply_rr(p_prog_month_local$F2_F3, rr_progress_now))
+  P["F3","F4_CC"] <- clip01(p_prog_month_local$F3_F4)                   
 
 ### Fibrosis regression — regression RR applies to F2->F1 and F3->F2
-P["F1","F0"]    <- clip01(p_prog_month_local$F1_F0)                     
-P["F2","F1"]    <- clip01(p_prog_month_local$F2_F1 * rr_regress_now)    
-P["F3","F2"]    <- clip01(p_prog_month_local$F3_F2 * rr_regress_now)    
-P["F4_CC","F3"] <- clip01(p_prog_month_local$F4_F3)                                 
+  P["F1","F0"]    <- clip01(p_prog_month_local$F1_F0)
+  P["F2","F1"]    <- clip01(apply_rr(p_prog_month_local$F2_F1, rr_regress_now))
+  P["F3","F2"]    <- clip01(apply_rr(p_prog_month_local$F3_F2, rr_regress_now))
+  P["F4_CC","F3"] <- clip01(p_prog_month_local$F4_F3)                               
   
   ### Advanced liver routes 
   P["F3","HCC"]    <- clip01(p_prog_month_local$F3_HCC)
@@ -158,7 +161,7 @@ summarize_outcomes <- function(trace, drug_cost_per_year,
     on_vec[1:idx_end] <- 1
      }
 
-    treat_year_marker <- ceiling(cumsum(on_vec) / 12)   
+    treat_year_marker <- ceiling(cumsum(on_vec) / round(1/cycle_length))  
     treat_year_marker[on_vec == 0] <- 0
 
     years_treated <- length(unique(treat_year_marker[treat_year_marker > 0]))
@@ -292,3 +295,4 @@ run_strategy <- function(treat_start, label) {
 }
 
 cat("01_model_functions.R loaded.\n")
+
