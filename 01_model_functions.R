@@ -144,7 +144,7 @@ run_markov <- function(P4d_single, v_init){
 #############################################################
 
 summarize_outcomes <- function(trace, drug_cost_per_year,
-                               util_matrix, bg_cost_month,
+                               util_matrix, bg_cost_cycle,
                                cost_vector,
                                treat_dur_cycles) {
 
@@ -174,7 +174,7 @@ summarize_outcomes <- function(trace, drug_cost_per_year,
 
   # Background cost 
   alive <- 1 - trace[, "Dead"]
-  bg_cost_extended <- c(bg_cost_month[1], bg_cost_month)
+  bg_cost_extended <- c(bg_cost_cycle[1], bg_cost_cycle)
   v_bg_cost_cycle <- bg_cost_extended * alive
 
   # Total cost
@@ -199,7 +199,7 @@ summarize_outcomes <- function(trace, drug_cost_per_year,
 #############################################################
 
 summarize_strategies <- function(traces_list, scenario_name,
-                                 util_matrix, bg_cost_month,
+                                 util_matrix, bg_cost_cycle,
                                  cost_vector, drug_cost_vec,
                                  treat_dur_cycles_vec) {
 
@@ -209,7 +209,7 @@ summarize_strategies <- function(traces_list, scenario_name,
       trace              = traces_list[[stg]],
       drug_cost_per_year = drug_cost_vec[stg],
       util_matrix        = util_matrix,
-      bg_cost_month      = bg_cost_month,
+      bg_cost_cycle      = bg_cost_cycle,
       cost_vector        = cost_vector,
       treat_dur_cycles   = treat_dur_cycles_vec[stg]
     )
@@ -244,7 +244,7 @@ run_owsa_icer <- function(rr_regress_vec      = rr_regress,
                           util_matrix         = m_util_base,
                           cost_vector         = costs_base,
                           drug_cost_vec       = drug_cost,
-                          bg_cost_month_vec   = v_background_cost_month,
+                          bg_cost_cycle_vec   = v_background_cost_cycle,
                           p_prog_month_local  = p_prog_month,
                           treat_dur_cycles_vec = base_treat_dur_cycles,
                           treat_start_cycles   = treat_start_immediate,
@@ -263,7 +263,7 @@ run_owsa_icer <- function(rr_regress_vec      = rr_regress,
   res_loc <- summarize_strategies(
     traces_loc, "SA",
     util_matrix,
-    bg_cost_month_vec,
+    bg_cost_cycle_vec,
     cost_vector,
     drug_cost_vec,
     treat_dur_cycles_vec
@@ -288,7 +288,7 @@ run_strategy <- function(treat_start, label) {
 
   list(
     summary = summarize_strategies(traces_sc, label, m_util_base,
-                                   v_background_cost_month, costs_base,
+                                   v_background_cost_cycle, costs_base,
                                    drug_cost, treat_dur_cycles_vec = treat_dur_72w_cycles),
     traces  = traces_sc
   )

@@ -23,13 +23,13 @@ generate_psa_params <- function(n_sim) {
 
   df <- data.frame(
 
-    ## TREATMENT EFFECTS (log-normal) 
+    ## TREATMENT EFFECTS (log-normal, SEs from ESSENCE trial cell counts)
     rr_sema_regress  = rlnorm(n_sim,
-                              meanlog = log(1.5625),
-                              sdlog   = se_from_range(log(1.5625), log(1.7282))),
+                              meanlog = log(1.6637),
+                              sdlog   = 0.1280),
     rr_sema_progress = rlnorm(n_sim,
-                              meanlog = log(0.6097),
-                              sdlog   = (log(0.6097) - log(0.3734)) / 1.96),
+                              meanlog = log(0.5785),
+                              sdlog   = 0.2116),
 
     ## FIBROSIS TRANSITION HAZARDS (annual, gamma) 
     h_F0_F1 = rgamma(n_sim,
@@ -59,8 +59,8 @@ generate_psa_params <- function(n_sim) {
 
     ## Advanced state hazards (annual) 
     h_F4_DCC    = rgamma(n_sim,
-                         gamma_params(0.0378, se_from_range(0.03, 0.12))$shape,
-                         scale = gamma_params(0.0378, se_from_range(0.03, 0.12))$scale),
+                         gamma_params(0.0659, se_from_range(0.03, 0.12))$shape,
+                         scale = gamma_params(0.0659, se_from_range(0.03, 0.12))$scale),
     h_DCC_Death = rgamma(n_sim,
                          gamma_params(0.32, se_from_range(0.15, 0.40))$shape,
                          scale = gamma_params(0.32, se_from_range(0.15, 0.40))$scale),
@@ -101,12 +101,6 @@ generate_psa_params <- function(n_sim) {
                          scale = gamma_params(lt_add_cost_base,
                                               se_from_range(lt_add_cost_low,
                                                           lt_add_cost_high))$scale),
-
-    ## Drug cost (gamma)
-    cost_sema  = rgamma(n_sim,
-                        gamma_params(6829, se_from_range(2940, 13658))$shape,
-                        scale = gamma_params(6829, se_from_range(2940, 
-                                                                 13658))$scale),
 
     ## HEALTH STATE UTILITIES (decrement, beta) 
     # SE is capped inside beta_params() to keep alpha/beta positive
@@ -154,20 +148,20 @@ run_model_psa_iter_all <- function(psa_row) {
   rr_reg_psa  <- rr_regress;  rr_reg_psa["Semaglutide"]  <- psa_row$rr_sema_regress
   rr_prog_psa <- rr_progress; rr_prog_psa["Semaglutide"] <- psa_row$rr_sema_progress
 
-  p_month_psa <- p_prog_month
-  p_month_psa$F0_F1        <- rate_to_prob(psa_row$h_F0_F1,        cycle_length)
-  p_month_psa$F1_F0        <- rate_to_prob(psa_row$h_F1_F0,        cycle_length)
-  p_month_psa$F1_F2        <- rate_to_prob(psa_row$h_F1_F2,        cycle_length)
-  p_month_psa$F2_F1        <- rate_to_prob(psa_row$h_F2_F1,        cycle_length)
-  p_month_psa$F2_F3        <- rate_to_prob(psa_row$h_F2_F3,        cycle_length)
-  p_month_psa$F3_F2        <- rate_to_prob(psa_row$h_F3_F2,        cycle_length)
-  p_month_psa$F3_F4        <- rate_to_prob(psa_row$h_F3_F4,        cycle_length)
-  p_month_psa$F4_F3        <- rate_to_prob(psa_row$h_F4_F3,        cycle_length)
-  p_month_psa$F4_DCC       <- rate_to_prob(psa_row$h_F4_DCC,       cycle_length)
-  p_month_psa$DCC_Death    <- rate_to_prob(psa_row$h_DCC_Death,    cycle_length)
-  p_month_psa$HCC_Death    <- rate_to_prob(psa_row$h_HCC_Death,    cycle_length)
-  p_month_psa$LT_Death     <- rate_to_prob(psa_row$h_LT_Death,     cycle_length)
-  p_month_psa$PostLT_Death <- rate_to_prob(psa_row$h_PostLT_Death, cycle_length)
+  p_cycle_psa <- p_prog_month
+  p_cycle_psa$F0_F1        <- rate_to_prob(psa_row$h_F0_F1,        cycle_length)
+  p_cycle_psa$F1_F0        <- rate_to_prob(psa_row$h_F1_F0,        cycle_length)
+  p_cycle_psa$F1_F2        <- rate_to_prob(psa_row$h_F1_F2,        cycle_length)
+  p_cycle_psa$F2_F1        <- rate_to_prob(psa_row$h_F2_F1,        cycle_length)
+  p_cycle_psa$F2_F3        <- rate_to_prob(psa_row$h_F2_F3,        cycle_length)
+  p_cycle_psa$F3_F2        <- rate_to_prob(psa_row$h_F3_F2,        cycle_length)
+  p_cycle_psa$F3_F4        <- rate_to_prob(psa_row$h_F3_F4,        cycle_length)
+  p_cycle_psa$F4_F3        <- rate_to_prob(psa_row$h_F4_F3,        cycle_length)
+  p_cycle_psa$F4_DCC       <- rate_to_prob(psa_row$h_F4_DCC,       cycle_length)
+  p_cycle_psa$DCC_Death    <- rate_to_prob(psa_row$h_DCC_Death,    cycle_length)
+  p_cycle_psa$HCC_Death    <- rate_to_prob(psa_row$h_HCC_Death,    cycle_length)
+  p_cycle_psa$LT_Death     <- rate_to_prob(psa_row$h_LT_Death,     cycle_length)
+  p_cycle_psa$PostLT_Death <- rate_to_prob(psa_row$h_PostLT_Death, cycle_length)
 
   cost_vec_psa          <- costs_base
   cost_vec_psa["F0"]    <- psa_row$cost_F0_F2
@@ -180,8 +174,8 @@ run_model_psa_iter_all <- function(psa_row) {
   for (st in c("LT_Y1", "LT_Y1_P"))
     cost_vec_psa[st] <- 452682 + psa_row$cost_lt_add
 
-  drug_psa                <- drug_cost
-  drug_psa["Semaglutide"] <- psa_row$cost_sema
+  # Drug cost fixed at base case (no PSA uncertainty)
+  drug_psa <- drug_cost
 
   qdec_psa             <- qaly_dec_base
   qdec_psa["F0"]       <- psa_row$qdec_F0_F2
@@ -199,7 +193,7 @@ run_model_psa_iter_all <- function(psa_row) {
 
   ## ---- Strategy 1: LSM (no treatment, natural history) ----
   aP_lsm <- build_a_P(rr_reg_psa, rr_prog_psa,
-                      p_prog_month_local = p_month_psa,
+                      p_prog_month_local = p_cycle_psa,
                       treat_dur_cycles   = c(LSM = 0L, Semaglutide = 0L),
                       treat_start_cycles = treat_start_immediate)
 
@@ -209,14 +203,14 @@ run_model_psa_iter_all <- function(psa_row) {
 
   res_lsm <- summarize_strategies(
     traces_lsm, "LSM",
-    util_mat_psa, v_background_cost_month,
+    util_mat_psa, v_background_cost_cycle,
     cost_vec_psa, drug_psa,
     treat_dur_cycles_vec = c(LSM = 0L, Semaglutide = 0L)
   )
 
   ## ---- Strategy 2: Treat at 12 (72 weeks starting immediately) ----
   aP_12 <- build_a_P(rr_reg_psa, rr_prog_psa,
-                     p_prog_month_local = p_month_psa,
+                     p_prog_month_local = p_cycle_psa,
                      treat_dur_cycles   = treat_dur_72w_cycles,
                      treat_start_cycles = treat_start_immediate)
 
@@ -226,14 +220,14 @@ run_model_psa_iter_all <- function(psa_row) {
 
   res_12 <- summarize_strategies(
     traces_12, "Age12",
-    util_mat_psa, v_background_cost_month,
+    util_mat_psa, v_background_cost_cycle,
     cost_vec_psa, drug_psa,
     treat_dur_cycles_vec = treat_dur_72w_cycles
   )
 
   ## ---- Strategy 3: Wait until 18 (natural history age 12-18, then 72 weeks) ----
   aP_18 <- build_a_P(rr_reg_psa, rr_prog_psa,
-                     p_prog_month_local = p_month_psa,
+                     p_prog_month_local = p_cycle_psa,
                      treat_dur_cycles   = treat_dur_72w_cycles,
                      treat_start_cycles = treat_start_age18)
 
@@ -243,7 +237,7 @@ run_model_psa_iter_all <- function(psa_row) {
 
   res_18 <- summarize_strategies(
     traces_18, "Age18",
-    util_mat_psa, v_background_cost_month,
+    util_mat_psa, v_background_cost_cycle,
     cost_vec_psa, drug_psa,
     treat_dur_cycles_vec = treat_dur_72w_cycles
   )

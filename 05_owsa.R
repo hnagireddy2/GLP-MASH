@@ -23,7 +23,7 @@ owsa_params[["baseline_transitions"]] <- c(
 
 ###### 2. Semaglutide efficacy (regression RR)
 rr_reg_base <- rr_regress["Semaglutide"]
-rr_reg_SA   <- 1.728240524
+rr_reg_SA   <- RR_reg_hi   # upper CI bound from ESSENCE derivation
 
 rr_reg_lo <- rr_regress; rr_reg_lo["Semaglutide"] <- rr_reg_base         
 rr_reg_hi <- rr_regress; rr_reg_hi["Semaglutide"] <- rr_reg_SA           
@@ -80,7 +80,14 @@ base_icer <- run_owsa_icer()
 wtp_threshold    <- 150000
 
 calculate_ce_out_mash <- function(l_params, n_wtp = wtp_threshold) {
-
+  
+  # Override global discount vectors
+  v_dwc_saved <- v_dwc
+  v_dwu_saved <- v_dwu
+  disc <- l_params[["Discount rate"]]
+  v_dwc <<- 1/(1+disc)^((0:n_cycles)*cycle_length)
+  v_dwu <<- 1/(1+disc)^((0:n_cycles)*cycle_length)
+  
   rr_reg_loc  <- rr_regress
   rr_reg_loc["Semaglutide"]  <- l_params[["Semaglutide regression RR"]]
 
@@ -113,7 +120,7 @@ calculate_ce_out_mash <- function(l_params, n_wtp = wtp_threshold) {
   traces_12 <- lapply(treatments, function(stg) run_markov(aP_12[,,,stg], v_init))
   names(traces_12) <- treatments
   res_12 <- summarize_strategies(traces_12, "Age12",
-                                 util_mat_loc, v_background_cost_month,
+                                 util_mat_loc, v_background_cost_cycle,
                                  cost_loc, drug_loc, treat_dur_72w_cycles)
 
   aP_18 <- build_a_P(rr_reg_loc, rr_prog_loc,
@@ -123,7 +130,7 @@ calculate_ce_out_mash <- function(l_params, n_wtp = wtp_threshold) {
   traces_18 <- lapply(treatments, function(stg) run_markov(aP_18[,,,stg], v_init))
   names(traces_18) <- treatments
   res_18 <- summarize_strategies(traces_18, "Age18",
-                                 util_mat_loc, v_background_cost_month,
+                                 util_mat_loc, v_background_cost_cycle,
                                  cost_loc, drug_loc, treat_dur_72w_cycles)
 
   results <- list(
@@ -142,6 +149,11 @@ calculate_ce_out_mash <- function(l_params, n_wtp = wtp_threshold) {
     stringsAsFactors = FALSE
   )
   df_out$NMB <- df_out$Effect * n_wtp - df_out$Cost
+  
+  # Restore global discount vectors
+  v_dwc <<- v_dwc_saved
+  v_dwu <<- v_dwu_saved
+  
   df_out
 }
 
@@ -151,18 +163,20 @@ df_params_owsa <- data.frame(
            "Transition probabilities (0.75x-1.25x)",
            "State medical costs (0.75x-1.25x)",
            "Semaglutide annual cost",
-           "Health state utilities (0.9x-1.1x)"),
-  min = c(1.0,           rr_sema_progress, 0.75, 0.75, cost_sema_low,  0.90),
-  max = c(1.728240524,   1.0,              1.25, 1.25, cost_sema_high, 1.10)
+           "Health state utilities (0.9x-1.1x)",
+           "Discount rate"),
+  min = c(1.0,         RR_progress, 0.75, 0.75, cost_sema_low,  0.90, 0.00),
+  max = c(RR_reg_hi,   1.0,         1.25, 1.25, cost_sema_high, 1.10, 0.05)
 )
 
 l_params_basecase <- list(
-  "Semaglutide regression RR"              = rr_sema_regress,
-  "Semaglutide progression RR"             = rr_sema_progress,
+  "Semaglutide regression RR"              = RR_regress,
+  "Semaglutide progression RR"             = RR_progress,
   "Transition probabilities (0.75x-1.25x)" = 1.0,
   "State medical costs (0.75x-1.25x)"      = 1.0,
   "Semaglutide annual cost"                = cost_sema_base,
-  "Health state utilities (0.9x-1.1x)"     = 1.0
+  "Health state utilities (0.9x-1.1x)"     = 1.0,
+  "Discount rate"                          = 0.03
 )
 
 owsa_nmb <- run_owsa_det(
@@ -262,14 +276,14 @@ thresh_all_strats <- lapply(names(frontier_strats), function(strat_name) {
     })
 
   results[["rr_regress"]] <- find_threshold(
-    "Semaglutide regression RR", rr_sema_regress, 1.0, rr_sema_regress,
+    "Semaglutide regression RR", RR_regress, 1.0, RR_regress,
     run_fn = function(x) {
       rv <- rr_regress; rv["Semaglutide"] <- x
       run_owsa_icer(rr_regress_vec = rv, treat_dur_cycles_vec = dur_cyc, treat_start_cycles = start_cyc)
     })
 
   results[["rr_progress"]] <- find_threshold(
-    "Semaglutide progression RR", rr_sema_progress, rr_sema_progress, 1.0,
+    "Semaglutide progression RR", RR_progress, RR_progress, 1.0,
     run_fn = function(x) {
       pv <- rr_progress; pv["Semaglutide"] <- x
       run_owsa_icer(rr_progress_vec = pv, treat_dur_cycles_vec = dur_cyc, treat_start_cycles = start_cyc)
