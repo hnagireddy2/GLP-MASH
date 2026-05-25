@@ -31,7 +31,43 @@ okabe_ito_strat <- c(
 prob_to_rate  <- function(p, t = 1) -(1/t) * log(1 - p)
 rate_to_prob  <- function(r, t = 1) 1 - exp(-r * t)
 row_normalize <- function(m) sweep(m, 1, rowSums(m), FUN = "/")
+
 clip01        <- function(x) pmin(pmax(x, 0), 0.999)
+
+apply_rr_at_trial_timescale <- function(p_cycle_baseline, RR,
+                                        trial_weeks = 72,
+                                        weeks_per_year = 52.1429,
+                                        cycle_length_local = cycle_length) {
+  # Step 1: Cycle probability -> cycle rate
+  r_cycle <- -log(1 - p_cycle_baseline)
+  
+  # Step 2: Scale cycle rate to 72-week rate
+  cycles_in_trial <- trial_weeks / (weeks_per_year * cycle_length_local)
+  r_72wk <- r_cycle * cycles_in_trial
+  
+  # Step 3: Convert to 72-week probability
+  p_72wk <- 1 - exp(-r_72wk)
+  
+  # Step 4: Apply RR at the 72-week timescale
+  p_72wk_treated <- p_72wk * RR
+  
+  # Safety check
+  if (p_72wk_treated >= 1) {
+    warning("Treated 72-week probability >= 1. Clamping to 0.999.")
+    p_72wk_treated <- 0.999
+  }
+  
+  # Step 5: Convert treated 72-week probability back to rate
+  r_72wk_treated <- -log(1 - p_72wk_treated)
+  
+  # Step 6: Scale treated rate back to cycle length
+  r_cycle_treated <- r_72wk_treated / cycles_in_trial
+  
+  # Step 7: Convert to cycle probability
+  p_cycle_treated <- 1 - exp(-r_cycle_treated)
+  
+  return(p_cycle_treated)
+}
 
 ############################################################
 ########### Load Mortality + Background Costs ##############
@@ -43,7 +79,7 @@ mort_cost_df <- read.csv("~/GitHub/GLP-MASH/age_mort_background_costs.csv")
 ######################## Model Specs ########################
 #############################################################
 
-cycle_length <- 1/12         # Monthly
+cycle_length <- 4 / 52.1429  # 4-week cycles 
 age_start    <- 12
 time_horizon <- 80           # 80 years of cycles
 age_end      <- age_start + time_horizon
@@ -59,6 +95,8 @@ v_states <- c(
 )
 n_states <- length(v_states)
 
+treatments <- c("LSM", "Semaglutide")
+
 # Initial F2/F3 distribution based on normalizing NHANES-based F2/F3 distribution 
 v_init <- c(F0 = 0,    F1 = 0,    F2 = 0.686, F3 = 0.314,
             F4_CC = 0, DCC = 0,   HCC = 0,
@@ -72,25 +110,25 @@ v_init <- c(F0 = 0,    F1 = 0,    F2 = 0.686, F3 = 0.314,
 costs_base <- c(
   F0=8698, F1=8698, F2=8698, F3=10372, F4_CC=42207,
   DCC=195156, HCC=141615,
-  LT_Y1_P=185743, LT_Y1=262900,
-  Post_LT=49851, Dead=0
+  LT_Y1_P=189782, LT_Y1=262900,
+  Post_LT=2344, Dead=0
 )
 
 ### LT Complications 
 
 # Vector of probabilities for each LT complication 
 lt_comp_probs <- c(
-  acr=0.2, biliary_comp=0.105, HAT=0.0545, skin_infection=0.21,
+  acr=0.2, biliary_comp=0.105, HAT=0.0545, skin_infection=0.19,
   pneumonia=0.155, bloodstream_inf=0.29, peritonitis=0.0765,
   uti=0.17, cdiff=0.0385, other_infection=0.55,
-  VTE=0.031, reoperation=0.125, primary_nonfxn=0.226,
+  VTE=0.034, reoperation=0.125, primary_nonfxn=0.226,
   HVS=0.035, renal_failure=0.1
 )
 
 # Lower Bounds Vector 
 lt_comp_probs_low <- c(
   acr=0.15, biliary_comp=0.02, HAT=0.019,
-  skin_infection=0.16, pneumonia=0.08, bloodstream_inf=0.19,
+  skin_infection=0.13, pneumonia=0.08, bloodstream_inf=0.19,
   peritonitis=0.063, uti=0.16, cdiff=0.027,
   other_infection=0.41, VTE=0.02, reoperation=0.08,
   primary_nonfxn=0.052, HVS=0.01, renal_failure=0.05
@@ -141,7 +179,7 @@ costs_base["LT_Y1_P"] <- costs_base["LT_Y1_P"] + lt_add_cost_base
 ### Drug costs (annual)
 cost_lsm        <- 0
 cost_sema_base  <- 6829     
-cost_sema_low   <- 2940     
+cost_sema_low   <- 4188    
 cost_sema_high  <- 13658    
 
 drug_cost <- c(
@@ -182,7 +220,7 @@ v_background_cost_annual <-
          mort_cost_df$background_cost_2025,
          ages_cycles, rule = 2)$y   
 
-v_background_cost_month <- v_background_cost_annual / 12
+v_background_cost_cycle <- v_background_cost_annual * cycle_length
 
 #############################################################
 ########################## Utilities ########################
@@ -274,27 +312,84 @@ p_prog_month <- list(
 ###################    TREATMENT EFFECTS   ##################
 #############################################################
 
-treatments <- c("LSM","Semaglutide")
 all_strat_labels <- c(
   "LSM",
   "Sema 72w (Age 12)",
   "Sema 72w (Age 18)"
 )
 
-## Semaglutide progression effect (vs LSM)
-rr_sema_progress <- 0.6097
+#############################################################
+## RR Derivation from ESSENCE Trial (Sanyal et al. 2025)   ##
+#############################################################
 
-## Semaglutide regression effect (vs LSM) 
-rr_sema_regress  <- 1.5625
+# --- Regression RR (fibrosis improvement, no worsening of steatohepatitis) ---
+# Source: Supplement page 27, composite table
+a_reg <- 197   # sema responders (regressed)
+b_reg <- 337   # sema non-responders
+c_reg <- 59    # placebo responders (regressed)
+d_reg <- 207   # placebo non-responders
+
+N_tx_reg      <- a_reg + b_reg   # 534
+N_placebo_reg <- c_reg + d_reg   # 266
+
+p_tx_reg      <- a_reg / N_tx_reg        # 0.3690
+p_placebo_reg <- c_reg / N_placebo_reg   # 0.2218
+
+RR_regress <- p_tx_reg / p_placebo_reg   # 1.6637
+
+# SE on the log scale
+SE_ln_RR_regress <- sqrt(1/a_reg - 1/N_tx_reg + 1/c_reg - 1/N_placebo_reg)
+ln_RR_regress    <- log(RR_regress)
+
+# 95% CI
+RR_reg_lo <- exp(ln_RR_regress - 1.96 * SE_ln_RR_regress)  # 1.295
+RR_reg_hi <- exp(ln_RR_regress + 1.96 * SE_ln_RR_regress)  # 2.139
+
+cat("=== Regression RR ===\n")
+cat("RR:", round(RR_regress, 4), "\n")
+cat("SE(ln RR):", round(SE_ln_RR_regress, 4), "\n")
+cat("95% CI:", round(RR_reg_lo, 3), "-", round(RR_reg_hi, 3), "\n\n")
+
+# --- Progression RR (F2 worsening) ---
+# Source: Table S6 / Figure S13 (F2 subgroup only)
+a_prog <- 35   # sema F2 patients who progressed
+b_prog <- 134  # sema F2 patients who did not progress
+c_prog <- 29   # placebo F2 patients who progressed
+d_prog <- 52   # placebo F2 patients who did not progress
+
+N_tx_prog      <- a_prog + b_prog   # 169
+N_placebo_prog <- c_prog + d_prog   # 81
+
+p_tx_prog      <- a_prog / N_tx_prog        # 0.2071
+p_placebo_prog <- c_prog / N_placebo_prog   # 0.3580
+
+RR_progress <- p_tx_prog / p_placebo_prog   # 0.5785
+
+# SE on the log scale
+SE_ln_RR_progress <- sqrt(1/a_prog - 1/N_tx_prog + 1/c_prog - 1/N_placebo_prog)
+ln_RR_progress    <- log(RR_progress)
+
+# 95% CI
+RR_prog_lo <- exp(ln_RR_progress - 1.96 * SE_ln_RR_progress)  # 0.382
+RR_prog_hi <- exp(ln_RR_progress + 1.96 * SE_ln_RR_progress)  # 0.876
+
+cat("=== Progression RR ===\n")
+cat("RR:", round(RR_progress, 4), "\n")
+cat("SE(ln RR):", round(SE_ln_RR_progress, 4), "\n")
+cat("95% CI:", round(RR_prog_lo, 3), "-", round(RR_prog_hi, 3), "\n\n")
+
+#############################################################
+## Treatment Effect RR Vectors (used by build_a_P)         ##
+#############################################################
 
 rr_regress <- c(
   LSM         = 1.0,
-  Semaglutide = rr_sema_regress
+  Semaglutide = RR_regress
 )
 
 rr_progress <- c(
   LSM         = 1.0,
-  Semaglutide = rr_sema_progress
+  Semaglutide = RR_progress
 )
 
 ##############################################################

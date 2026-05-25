@@ -24,9 +24,9 @@ v_init_essence <- c(F0 = 0, F1 = 0, F2 = 0.313, F3 = 0.687, F4_CC = 0,
 # ---- 2. HCC/DCC transitions (shared across all sets) ----
 hcc_dcc_shared <- c(
   F3_HCC  = 0.0034,
-  F4_DCC  = 0.0378,
-  F4_HCC  = 0.0659,
-  DCC_HCC = 0.0069
+  F4_DCC  = 0.0659,
+  F4_HCC  = 0.0378,
+  DCC_HCC = 0.0378
 )
 
 # ---- 3. Fibrosis transition sets (annual probabilities) ----
