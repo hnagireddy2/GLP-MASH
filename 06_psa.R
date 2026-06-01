@@ -262,7 +262,9 @@ run_model_psa_iter_all <- function(psa_row) {
 
 n_sim_all <- 1000
 
-if (!file.exists("psa_results_all.rds")) {
+# Uncomment to prevent overwriting of cache:
+# if (!file.exists("psa_results_all.rds")) {
+
   df_psa_input_all <- generate_psa_params(n_sim_all)
   df_c_all <- as.data.frame(matrix(0, nrow = n_sim_all,
                                    ncol = length(all_strat_labels)))
@@ -286,13 +288,14 @@ if (!file.exists("psa_results_all.rds")) {
                df_psa_input_all = df_psa_input_all),
           "psa_results_all.rds")
 
-} else {
-  all_psa          <- readRDS("psa_results_all.rds")
-  df_c_all         <- all_psa$df_c_all
-  df_e_all         <- all_psa$df_e_all
-  df_psa_input_all <- all_psa$df_psa_input_all
-  cat("Loaded all-strategy PSA results from cache.\n")
-}
+  # Comment out the closing bracket and the else block:
+  # } else {
+  #   all_psa          <- readRDS("psa_results_all.rds")
+  #   df_c_all         <- all_psa$df_c_all
+  #   df_e_all         <- all_psa$df_e_all
+  #   df_psa_input_all <- all_psa$df_psa_input_all
+  #   cat("Loaded all-strategy PSA results from cache.\n")
+  # }
 
 test_res <- run_model_psa_iter_all(df_psa_input_all[1, ])
 cat("Labels returned by function:\n")
