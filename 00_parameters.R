@@ -178,9 +178,9 @@ costs_base["LT_Y1_P"] <- costs_base["LT_Y1_P"] + lt_add_cost_base
 
 ### Drug costs (annual)
 cost_lsm        <- 0
-cost_sema_base  <- 6829     
+cost_sema_base  <- 14072     
 cost_sema_low   <- 4188    
-cost_sema_high  <- 13658    
+cost_sema_high  <- 16188    
 
 drug_cost <- c(
   LSM         = cost_lsm,
