@@ -183,12 +183,10 @@ cat("\nFibrosis transitions in p_prog_month now set to '", best,
     "' from the calibration.\n", sep = "")
 
 #############################################################
-######## OWSA bounds: Le et al. observational range #########
+########### OWSA bounds: Le et al. trial range ##############
 #############################################################
 
-p_prog_month_le_low  <- build_p_prog_from_annual(candidate_sets$obs_low,
-                                                 p_prog_month)
-p_prog_month_le_high <- build_p_prog_from_annual(candidate_sets$obs_high,
-                                                 p_prog_month)
+p_prog_month_le_low  <- build_p_prog_from_annual(candidate_sets$trial_low,  p_prog_month)
+p_prog_month_le_high <- build_p_prog_from_annual(candidate_sets$trial_high, p_prog_month)
 
 cat("02_calibration.R complete.\n")
