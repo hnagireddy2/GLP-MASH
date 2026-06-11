@@ -1,5 +1,5 @@
 # 01_model_functions.R
-# Requires: source("00_parameters.R")
+# Requires: source("00_parameters.R"), source("00b_le_transitions.R")
 
 #############################################################
 ######################## CYCLE TRANSITION ###################

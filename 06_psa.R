@@ -1,5 +1,5 @@
 # 06_psa.R
-# Requires: 00_parameters.R, 01_model_functions.R, 02_calibration.R
+# Requires: source("00_parameters.R"), source("00b_le_transitions.R"), source("02_calibration.R")
 # PSA parameter generation, PSA iterator, and simulation loop
 
 #############################################################
@@ -57,22 +57,39 @@ generate_psa_params <- function(n_sim) {
                      gamma_params(0.047, se_from_range(0.021, 0.108))$shape,
                      scale = gamma_params(0.047, se_from_range(0.021, 0.108))$scale),
 
-    ## Advanced state hazards (annual) 
+    ## Advanced-disease hazards (annual). Means = base case (nonfib_annual);
+    ## ranges = 95% CI from Kim S1 SEs, or Kim's 20%-of-mean rule for the
+    ## Rustgi-sourced LT transitions. se_from_range() recovers SE = range/4.
+    h_F3_HCC    = rgamma(n_sim,
+                         gamma_params(0.0034, se_from_range(0.0021, 0.0047))$shape,
+                         scale = gamma_params(0.0034, se_from_range(0.0021, 0.0047))$scale),
+    h_F4_HCC    = rgamma(n_sim,
+                         gamma_params(0.0378, se_from_range(0.0213, 0.0543))$shape,
+                         scale = gamma_params(0.0378, se_from_range(0.0213, 0.0543))$scale),
     h_F4_DCC    = rgamma(n_sim,
-                         gamma_params(0.0659, se_from_range(0.03, 0.12))$shape,
-                         scale = gamma_params(0.0659, se_from_range(0.03, 0.12))$scale),
+                         gamma_params(0.0659, se_from_range(0.0400, 0.0918))$shape,
+                         scale = gamma_params(0.0659, se_from_range(0.0400, 0.0918))$scale),
+    h_DCC_HCC   = rgamma(n_sim,
+                         gamma_params(0.0378, se_from_range(0.0213, 0.0543))$shape,
+                         scale = gamma_params(0.0378, se_from_range(0.0213, 0.0543))$scale),
+    h_DCC_LT    = rgamma(n_sim,
+                         gamma_params(0.0230, se_from_range(0.0140, 0.0320))$shape,
+                         scale = gamma_params(0.0230, se_from_range(0.0140, 0.0320))$scale),
     h_DCC_Death = rgamma(n_sim,
-                         gamma_params(0.32, se_from_range(0.15, 0.40))$shape,
-                         scale = gamma_params(0.32, se_from_range(0.15, 0.40))$scale),
+                         gamma_params(0.20, se_from_range(0.1216, 0.2784))$shape,
+                         scale = gamma_params(0.20, se_from_range(0.1216, 0.2784))$scale),
+    h_HCC_LT    = rgamma(n_sim,
+                         gamma_params(0.0300, se_from_range(0.0182, 0.0418))$shape,
+                         scale = gamma_params(0.0300, se_from_range(0.0182, 0.0418))$scale),
     h_HCC_Death = rgamma(n_sim,
-                         gamma_params(0.19, se_from_range(0.10, 0.38))$shape,
-                         scale = gamma_params(0.19, se_from_range(0.10, 0.38))$scale),
+                         gamma_params(0.1305, se_from_range(0.1049, 0.1561))$shape,
+                         scale = gamma_params(0.1305, se_from_range(0.1049, 0.1561))$scale),
     h_LT_Death  = rgamma(n_sim,
-                         gamma_params(0.067, se_from_range(0.065, 0.10))$shape,
-                         scale = gamma_params(0.067, se_from_range(0.065, 0.10))$scale),
+                         gamma_params(0.0400, se_from_range(0.0243, 0.0557))$shape,
+                         scale = gamma_params(0.0400, se_from_range(0.0243, 0.0557))$scale),
     h_PostLT_Death = rgamma(n_sim,
-                            gamma_params(0.036, se_from_range(0.03, 0.05))$shape,
-                            scale = gamma_params(0.036, se_from_range(0.03, 0.05))$scale),
+                            gamma_params(0.0820, se_from_range(0.0499, 0.1141))$shape,
+                            scale = gamma_params(0.0820, se_from_range(0.0499, 0.1141))$scale),
 
     ## STATE COSTS (gamma) 
     cost_F0_F2 = rgamma(n_sim,
@@ -143,26 +160,35 @@ generate_psa_params <- function(n_sim) {
 #############################################################
 
 run_model_psa_iter_all <- function(psa_row) {
-
   ## ---- Build all PSA-sampled parameters ----
   rr_reg_psa  <- rr_regress;  rr_reg_psa["Semaglutide"]  <- psa_row$rr_sema_regress
   rr_prog_psa <- rr_progress; rr_prog_psa["Semaglutide"] <- psa_row$rr_sema_progress
-
-  p_cycle_psa <- p_prog_month
-  p_cycle_psa$F0_F1        <- rate_to_prob(psa_row$h_F0_F1,        cycle_length)
-  p_cycle_psa$F1_F0        <- rate_to_prob(psa_row$h_F1_F0,        cycle_length)
-  p_cycle_psa$F1_F2        <- rate_to_prob(psa_row$h_F1_F2,        cycle_length)
-  p_cycle_psa$F2_F1        <- rate_to_prob(psa_row$h_F2_F1,        cycle_length)
-  p_cycle_psa$F2_F3        <- rate_to_prob(psa_row$h_F2_F3,        cycle_length)
-  p_cycle_psa$F3_F2        <- rate_to_prob(psa_row$h_F3_F2,        cycle_length)
-  p_cycle_psa$F3_F4        <- rate_to_prob(psa_row$h_F3_F4,        cycle_length)
-  p_cycle_psa$F4_F3        <- rate_to_prob(psa_row$h_F4_F3,        cycle_length)
-  p_cycle_psa$F4_DCC       <- rate_to_prob(psa_row$h_F4_DCC,       cycle_length)
-  p_cycle_psa$DCC_Death    <- rate_to_prob(psa_row$h_DCC_Death,    cycle_length)
-  p_cycle_psa$HCC_Death    <- rate_to_prob(psa_row$h_HCC_Death,    cycle_length)
-  p_cycle_psa$LT_Death     <- rate_to_prob(psa_row$h_LT_Death,     cycle_length)
-  p_cycle_psa$PostLT_Death <- rate_to_prob(psa_row$h_PostLT_Death, cycle_length)
-
+  
+  ## All sampled hazards are ANNUAL probabilities; annual_to_month() does the
+  ## prob -> rate -> cycle conversion, same as how the base case is built,
+  ## so the PSA is centered on base. pmin() guards prob_to_rate at p<1.
+  amh <- function(p) annual_to_month(pmin(p, 0.999))
+  
+  p_cycle_psa <- p_prog_month          # seed from base case, then overwrite sampled cells
+  p_cycle_psa$F0_F1     <- amh(psa_row$h_F0_F1)
+  p_cycle_psa$F1_F0     <- amh(psa_row$h_F1_F0)
+  p_cycle_psa$F1_F2     <- amh(psa_row$h_F1_F2)
+  p_cycle_psa$F2_F1     <- amh(psa_row$h_F2_F1)
+  p_cycle_psa$F2_F3     <- amh(psa_row$h_F2_F3)
+  p_cycle_psa$F3_F2     <- amh(psa_row$h_F3_F2)
+  p_cycle_psa$F3_F4     <- amh(psa_row$h_F3_F4)
+  p_cycle_psa$F4_F3     <- amh(psa_row$h_F4_F3)
+  p_cycle_psa$F3_HCC    <- amh(psa_row$h_F3_HCC)
+  p_cycle_psa$F4_HCC    <- amh(psa_row$h_F4_HCC)
+  p_cycle_psa$F4_DCC    <- amh(psa_row$h_F4_DCC)
+  p_cycle_psa$DCC_HCC   <- amh(psa_row$h_DCC_HCC)
+  p_cycle_psa$DCC_LT    <- amh(psa_row$h_DCC_LT)
+  p_cycle_psa$DCC_Death <- amh(psa_row$h_DCC_Death)
+  p_cycle_psa$HCC_LT    <- amh(psa_row$h_HCC_LT)
+  p_cycle_psa$HCC_Death <- amh(psa_row$h_HCC_Death)
+  p_cycle_psa$LT_Death  <- amh(psa_row$h_LT_Death)
+  p_cycle_psa$PostLT_Death <- amh(psa_row$h_PostLT_Death)
+  
   cost_vec_psa          <- costs_base
   cost_vec_psa["F0"]    <- psa_row$cost_F0_F2
   cost_vec_psa["F1"]    <- psa_row$cost_F0_F2

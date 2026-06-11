@@ -1,5 +1,5 @@
 # 05_owsa.R
-# Requires: 00_parameters.R, 01_model_functions.R, 02_calibration.R
+# Requires: source("00_parameters.R"), source("00b_le_transitions.R"), source("02_calibration.R")
 # One-way sensitivity analysis + threshold sensitivity analysis
 
 #############################################################
@@ -112,6 +112,9 @@ calculate_ce_out_mash <- function(l_params, n_wtp = wtp_threshold) {
   p_prog_loc$F3_F2 <- rate_to_prob(prob_to_rate(p_prog_month$F3_F2, cycle_length) * prog_sc, cycle_length)
   p_prog_loc$F3_F4 <- rate_to_prob(prob_to_rate(p_prog_month$F3_F4, cycle_length) * prog_sc, cycle_length)
   p_prog_loc$F4_F3 <- rate_to_prob(prob_to_rate(p_prog_month$F4_F3, cycle_length) * prog_sc, cycle_length)
+  p_prog_loc$DCC_Death <- annual_to_month(l_params[["DCC->Death (annual)"]])
+  p_prog_loc$HCC_Death <- annual_to_month(l_params[["HCC->Death (annual)"]])
+  p_prog_loc$F4_DCC    <- annual_to_month(l_params[["F4->DCC (annual)"]])
 
   aP_12 <- build_a_P(rr_reg_loc, rr_prog_loc,
                      p_prog_month_local = p_prog_loc,
@@ -164,9 +167,12 @@ df_params_owsa <- data.frame(
            "State medical costs (0.75x-1.25x)",
            "Semaglutide annual cost",
            "Health state utilities (0.9x-1.1x)",
-           "Discount rate"),
-  min = c(1.0,         RR_progress, 0.75, 0.75, cost_sema_low,  0.90, 0.00),
-  max = c(RR_reg_hi,   1.0,         1.25, 1.25, cost_sema_high, 1.10, 0.05)
+           "Discount rate",
+           "DCC->Death (annual)", 
+           "HCC->Death (annual)", 
+           "F4->DCC (annual)"),
+  min = c(1.0,         RR_progress, 0.75, 0.75, cost_sema_low,  0.90, 0.00, 0.1216, 0.1049, 0.0400),
+  max = c(RR_reg_hi,   1.0,         1.25, 1.25, cost_sema_high, 1.10, 0.05, 0.2784, 0.1561, 0.0918)
 )
 
 l_params_basecase <- list(
@@ -176,7 +182,10 @@ l_params_basecase <- list(
   "State medical costs (0.75x-1.25x)"      = 1.0,
   "Semaglutide annual cost"                = cost_sema_base,
   "Health state utilities (0.9x-1.1x)"     = 1.0,
-  "Discount rate"                          = 0.03
+  "Discount rate"                          = 0.03,
+  "DCC->Death (annual)"                    = 0.20,
+  "HCC->Death (annual)"                    = 0.1305,
+  "F4->DCC (annual)"                       = 0.0659
 )
 
 owsa_nmb <- run_owsa_det(

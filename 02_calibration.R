@@ -1,5 +1,5 @@
 # 02_calibration.R
-# Requires: source("00_parameters.R"), source("01_model_functions.R")
+# Requires: source("00_parameters.R"), source("00b_le_transitions.R"), source("01_model_functions.R")
 # Calibrates fibrosis transition probabilities to ESSENCE placebo data.
 # Outputs: p_prog_month (updated), candidate_sets, best, build_p_prog_from_annual,
 #          p_prog_month_le_low, p_prog_month_le_high
@@ -21,41 +21,15 @@ v_init_essence <- c(F0 = 0, F1 = 0, F2 = 0.313, F3 = 0.687, F4_CC = 0,
                     DCC = 0, HCC = 0, LT_Y1 = 0, LT_Y1_P = 0,
                     Post_LT = 0, Dead = 0)
 
-# ---- 2. HCC/DCC transitions (shared across all sets) ----
+# ---- 2. HCC/DCC transitions (single source: nonfib_annual, 00_parameters.R) ----
 hcc_dcc_shared <- c(
-  F3_HCC  = 0.0034,
-  F4_DCC  = 0.0659,
-  F4_HCC  = 0.0378,
-  DCC_HCC = 0.0378
+  F3_HCC  = nonfib_annual$F3_HCC,
+  F4_DCC  = nonfib_annual$F4_DCC,
+  F4_HCC  = nonfib_annual$F4_HCC,
+  DCC_HCC = nonfib_annual$DCC_HCC
 )
 
-# ---- 3. Fibrosis transition sets (annual probabilities) ----
-
-le_obs_low <- c(
-  F0_F1 = 0.0644, F1_F0 = 0.0284, F1_F2 = 0.0772, F2_F1 = 0.0452,
-  F2_F3 = 0.0689, F3_F2 = 0.1046, F3_F4 = 0.0599, F4_F3 = 0.0519
-)
-le_obs_mean <- c(
-  F0_F1 = 0.0978, F1_F0 = 0.0427, F1_F2 = 0.0979, F2_F1 = 0.0637,
-  F2_F3 = 0.0905, F3_F2 = 0.1266, F3_F4 = 0.0778, F4_F3 = 0.0763
-)
-le_obs_high <- c(
-  F0_F1 = 0.1312, F1_F0 = 0.0569, F1_F2 = 0.1186, F2_F1 = 0.0821,
-  F2_F3 = 0.1120, F3_F2 = 0.1485, F3_F4 = 0.0957, F4_F3 = 0.1007
-)
-
-le_trial_low <- c(
-  F0_F1 = 0.0897, F1_F0 = 0.0723, F1_F2 = 0.1254, F2_F1 = 0.1384,
-  F2_F3 = 0.1193, F3_F2 = 0.1210, F3_F4 = 0.0440, F4_F3 = 0.0450
-)
-le_trial_mean <- c(
-  F0_F1 = 0.1739, F1_F0 = 0.1193, F1_F2 = 0.2243, F2_F1 = 0.1910,
-  F2_F3 = 0.1689, F3_F2 = 0.1580, F3_F4 = 0.0763, F4_F3 = 0.0807
-)
-le_trial_high <- c(
-  F0_F1 = 0.3236, F1_F0 = 0.1935, F1_F2 = 0.3818, F2_F1 = 0.2599,
-  F2_F3 = 0.2359, F3_F2 = 0.2047, F3_F4 = 0.1306, F4_F3 = 0.1639
-)
+# ---- 3. Fibrosis transition sets (calculated in 001b) ----
 
 candidate_sets <- lapply(
   list(obs_low    = le_obs_low,
