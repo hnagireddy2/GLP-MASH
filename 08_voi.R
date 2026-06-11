@@ -1,5 +1,5 @@
 # 08_voi.R
-# Requires: 06_psa.R, 07_psa_postprocess.R
+# Requires: source("06_psa.R"), source("07_psa_postprocess.R")
 # Value of Information: EVPI, EVPPI, EVSI, ENBS
 
 # ============================================================

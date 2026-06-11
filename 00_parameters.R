@@ -267,20 +267,21 @@ annual_to_month <- function(p_annual) {
 
 # ---- Fixed annual transition probabilities ----
 nonfib_annual <- list(
-  F3_HCC        = 0.0034,   
-  F4_HCC        = 0.0378,   
-  F4_DCC        = 0.0659,   
-  DCC_HCC       = 0.0378,   
-  DCC_LT        = 0.023,   
-  DCC_Death     = 0.1549,     
-  HCC_LT        = 0.03,   
-  HCC_Death     = 0.3488,     
-  F4_LT         = 0.0,      
-  DCC_RegressF4 = 0.0,      
-  HCC_RegressF4 = 0.0,      
-  LT1_to_PostLT = 1.0,      
-  LT1P_to_PostLT= 1.0,
-  LT_Death      = 0.0909     
+  F3_HCC        = 0.0034,   # Kim 2025 Suppl. Table 1 (0.34%) -> Sanyal 2021
+  F4_HCC        = 0.0378,   # Kim 2025 Suppl. Table 1 (3.78%) -> Orci 2022
+  F4_DCC        = 0.0659,   # Kim 2025 Suppl. Table 1 (6.59%) -> Younossi 2020
+  DCC_HCC       = 0.0378,   # Kim 2025 Suppl. Table 1 (3.78%) -> Orci 2022
+  DCC_LT        = 0.023,    # Rustgi 2022 Table 1 (DCC -> LT)
+  DCC_Death     = 0.20,     # Kim 2025 Suppl. Table 1 (DC -> liver death) -> Estes 2018
+  HCC_LT        = 0.03,     # Rustgi 2022 Table 1 (HCC -> LT)
+  HCC_Death     = 0.1305,   # Kim 2025 Suppl. Table 1 (HCC -> liver death) -> SEER
+  F4_LT         = 0.0,      # structural
+  DCC_RegressF4 = 0.0,      # structural
+  HCC_RegressF4 = 0.0,      # structural
+  LT1_to_PostLT = 1.0,      # structural (deterministic)
+  LT1P_to_PostLT= 1.0,      # structural (deterministic)
+  LT_Death      = 0.0400,   # Rustgi 2022 Table 1, liver-related mortality only (LRM)
+  PostLT_Death  = 0.0820    # Rustgi 2022 Table 1, PLT row, liver-related mortality (LRM)
 )
 
 # Convert to monthly probabilities (except the deterministic post-LT ones)
@@ -305,7 +306,7 @@ p_prog_month <- list(
   LT1_to_PostLT = nonfib_annual$LT1_to_PostLT,
   LT1P_to_PostLT= nonfib_annual$LT1P_to_PostLT,
   LT_Death      = annual_to_month(nonfib_annual$LT_Death),
-  PostLT_Death  = rate_to_prob(0.036, cycle_length)
+  PostLT_Death  = annual_to_month(nonfib_annual$PostLT_Death)
 )
 
 #############################################################

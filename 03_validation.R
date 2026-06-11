@@ -1,5 +1,5 @@
 # 03_validation.R
-# Requires: 00_parameters.R, 01_model_functions.R, 02_calibration.R
+# Requires: source("00_parameters.R"), source("00b_le_transitions.R"), source("02_calibration.R")
 # F2 progression validation + Hagstrom time-to-severe-disease
 
 #############################################################

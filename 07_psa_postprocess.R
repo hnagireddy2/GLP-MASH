@@ -1,5 +1,5 @@
 # 07_psa_postprocess.R
-# Requires: 06_psa.R (df_c_all, df_e_all, df_psa_input_all)
+# Requires: source("06_psa.R") (df_c_all, df_e_all, df_psa_input_all)
 # PSA parameter distributions, CE scatter, CEAC, expected loss
 
 #############################################################
@@ -22,6 +22,11 @@ param_display_names <- c(
   h_F3_F4          = "Hazard F3\u2192F4",
   h_F4_F3          = "Hazard F4\u2192F3",
   h_F4_DCC         = "Hazard F4\u2192DCC",
+  h_F3_HCC         = "Hazard F3\u2192HCC",
+  h_F4_HCC         = "Hazard F4\u2192HCC",
+  h_DCC_HCC        = "Hazard DCC\u2192HCC",
+  h_DCC_LT         = "Hazard DCC\u2192LT",
+  h_HCC_LT         = "Hazard HCC\u2192LT",
   h_DCC_Death      = "DCC\u2192Death",
   h_HCC_Death      = "HCC\u2192Death",
   h_LT_Death       = "LT\u2192Death (yr 1)",
