@@ -345,7 +345,7 @@ ggplot(df_thresh_all_plot,
     name = "Direction"
   ) +
   scale_x_continuous(labels = function(x) paste0(x, "%"), expand = expansion(mult = c(0.45, 0.45))) +
-  labs(title    = "Threshold Sensitivity Analysis \u2014 Non-Dominated Strategies",
+  labs(title    = "Threshold Sensitivity Analysis \u2014 Semaglutide Treatment Strategies",
        subtitle = paste0("% change required to flip CE decision at WTP = $150K/QALY"),
        x = "% change from base value", y = NULL) +
   theme_bw(base_size = 13) +
