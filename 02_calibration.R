@@ -2,7 +2,7 @@
 # Requires: source("00_parameters.R"), source("00b_le_transitions.R"), source("01_model_functions.R")
 # Calibrates fibrosis transition probabilities to ESSENCE placebo data.
 # Outputs: p_prog_month (updated), candidate_sets, best, build_p_prog_from_annual,
-#          p_prog_month_le_low, p_prog_month_le_high
+#          p_prog_month_le_low, p_prog_month_le_high 
 
 #############################################################
 ####################### CALIBRATION #########################

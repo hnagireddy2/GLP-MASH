@@ -1,7 +1,7 @@
 # 04_base_case.R
 # Requires: source("00_parameters.R"), source("00b_le_transitions.R"), source("02_calibration.R"), source("03_validation.R")
 # CEA frontier + external validation (uses traces from base case runs)
-
+  
 #############################################################
 ########## COMBINED CEA FRONTIER: TWO STRATEGIES ############
 #############################################################

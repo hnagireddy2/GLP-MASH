@@ -1,7 +1,7 @@
 # 07_psa_postprocess.R
 # Requires: source("06_psa.R") (df_c_all, df_e_all, df_psa_input_all)
 # PSA parameter distributions, CE scatter, CEAC, expected loss
-
+  
 #############################################################
 ##########  PSA Parameter Distributions Plot  ###############
 #############################################################
@@ -178,7 +178,6 @@ ggplot(df_psa_all_means, aes(x = QALY, y = Cost,
   scale_shape_manual(
     name   = "Dominance status",
     values = c("Non-dominated"    = 16,
-               "Weakly dominated" = 1,
                "Dominated"        = 17)
   ) +
   scale_color_manual(
@@ -187,15 +186,15 @@ ggplot(df_psa_all_means, aes(x = QALY, y = Cost,
                "Treat Age 12" = "#0072B2",
                "Treat Age 18" = "#D55E00")
   ) +
-  scale_x_continuous("Mean PSA QALYs",       breaks = pretty_breaks(n = 6)) +
-  scale_y_continuous("Mean PSA Cost (USD)",
+  scale_x_continuous("QALYs",       breaks = pretty_breaks(n = 6)) +
+  scale_y_continuous("Cost (USD)",
                      labels = label_dollar(scale = 1),
                      breaks = pretty_breaks(n = 6)) +
   labs(
-    title    = "Post-PSA Combined CEA Frontier: All Strategies",
+    title    = "Cost-Effectiveness Frontier",
     subtitle = paste0(
-      "Points = PSA mean costs & QALYs (n = ", n_sim_all, " simulations)\n",
-      "\u25cf Non-dominated  \u25cb Weakly dominated  \u25b2 Dominated"
+      "Points = costs & QALYs (n = ", n_sim_all, " simulations)\n",
+      "\u25cf Non-dominated  \u25b2 Dominated"
     )
   ) +
   theme_bw(base_size = 14) +
@@ -237,4 +236,85 @@ plot(elc_all) +
   theme(legend.position  = "right",
         legend.text      = element_text(size = 8),
         legend.key.width = unit(1.5, "cm"))
+
+
+#############################################################
+######  95% Uncertainty Interval for ICER  ##################
+######  Sema Age 12 vs LSM (non-dominated pair)  ############
+#############################################################
+# Requires df_c_all, df_e_all from 06_psa.R (one row per PSA draw)
+
+# ---- 0. Exact strategy labels (must match df_c_all column names) ----
+s_trt <- "Sema 72w (Age 12)"   # exact match to df_c_all column name
+s_ref <- "LSM"
+
+# ---- 1. Per-draw incrementals = parameter-uncertainty cloud ----
+#    NO /sqrt(N): we want the spread of the posterior predictive,
+#    not Monte Carlo error of the mean.
+d_cost <- df_c_all[[s_trt]] - df_c_all[[s_ref]]
+d_qaly <- df_e_all[[s_trt]] - df_e_all[[s_ref]]
+
+ok     <- is.finite(d_cost) & is.finite(d_qaly)
+if (any(!ok)) cat(sprintf("Dropped %d of %d draws with NA/Inf\n", sum(!ok), length(ok)))
+d_cost <- d_cost[ok]
+d_qaly <- d_qaly[ok]
+
+# ---- 2. Point ICER (matches calculate_icers: ratio of means) ----
+icer_point <- mean(d_cost) / mean(d_qaly)
+
+# ---- 3. Diagnostic: fraction of draws with ΔQALY <= 0 ----
+#    If this is non-trivial (>~1-2%), the ratio interval is unstable;
+#    report INMB/CEAC instead.
+frac_dE_le0 <- mean(d_qaly <= 0)
+
+# ---- 4. HEADLINE: 95% uncertainty interval, percentile method ----
+icer_draws <- d_cost / d_qaly
+icer_ui    <- quantile(icer_draws, c(.025, .975), na.rm = TRUE)
+
+# ---- 5. INMB-based interval + P(cost-effective) at thresholds ----
+wtp_vec <- c(50000, 100000, 116000, 150000)   # set to your thresholds
+inmb_tbl <- do.call(rbind, lapply(wtp_vec, function(w) {
+  inmb <- w * d_qaly - d_cost                  # linear -> well-behaved
+  data.frame(
+    WTP        = w,
+    INMB_mean  = mean(inmb),
+    INMB_lower = quantile(inmb, .025),
+    INMB_upper = quantile(inmb, .975),
+    P_CE       = mean(inmb > 0)                 # prob cost-effective at w
+  )
+}))
+
+# ---- 6. Fieller CI (analytic, true frequentist CI) — robustness ----
+fieller_ci <- function(dc, de, level = .95) {
+  ok <- is.finite(dc) & is.finite(de)        # drop NA/NaN/Inf pairs
+  dc <- dc[ok]; de <- de[ok]
+  if (length(dc) < 2) return(c(lower = NA, upper = NA))
+  
+  mc <- mean(dc); me <- mean(de)
+  v11 <- var(dc); v22 <- var(de); v12 <- cov(dc, de)
+  z   <- qnorm(1 - (1 - level) / 2)
+  a   <- me^2 - z^2 * v22
+  b   <- -2 * (mc * me - z^2 * v12)
+  cc  <- mc^2 - z^2 * v11
+  disc <- b^2 - 4 * a * cc
+  
+  # isTRUE guards against any residual NA in the condition
+  if (!is.finite(a) || !is.finite(disc) || isTRUE(a <= 0) || isTRUE(disc < 0))
+    return(c(lower = NA, upper = NA))
+  sort((-b + c(-1, 1) * sqrt(disc)) / (2 * a))
+}
+
+icer_ci_fieller <- fieller_ci(d_cost, d_qaly)
+
+# ---- 7. Print summary ----
+cat(sprintf("\nSema Age 12 vs LSM  (n = %d draws)\n", length(d_cost)))
+cat(sprintf("  Point ICER          : $%s/QALY\n", format(round(icer_point), big.mark = ",")))
+cat(sprintf("  95%% UI (percentile) : $%s to $%s/QALY\n",
+            format(round(icer_ui[1]), big.mark = ","),
+            format(round(icer_ui[2]), big.mark = ",")))
+cat(sprintf("  95%% CI (Fieller)    : $%s to $%s/QALY\n",
+            format(round(icer_ci_fieller[1]), big.mark = ","),
+            format(round(icer_ci_fieller[2]), big.mark = ",")))
+cat(sprintf("  Frac draws ΔQALY<=0  : %.3f%%\n\n", 100 * frac_dE_le0))
+print(inmb_tbl, row.names = FALSE)
 

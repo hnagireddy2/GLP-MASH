@@ -1,6 +1,6 @@
 # 05_owsa.R
 # Requires: source("00_parameters.R"), source("00b_le_transitions.R"), source("02_calibration.R")
-# One-way sensitivity analysis + threshold sensitivity analysis
+# One-way sensitivity analysis + threshold sensitivity analysis 
 
 #############################################################
 ############# One-Way Sensitivity Analysis ##################
@@ -264,9 +264,9 @@ find_threshold <- function(param_name, base_val,
 }
 
 frontier_strats <- list(
-  "Sema 72w Age 12" = list(dur = treat_dur_72w_cycles,
+  "Semaglutide 72w Age 12" = list(dur = treat_dur_72w_cycles,
                            start = treat_start_immediate),
-  "Sema 72w Age 18" = list(dur = treat_dur_72w_cycles,
+  "Semaglutide 72w Age 18" = list(dur = treat_dur_72w_cycles,
                            start = treat_start_age18)
 )
 

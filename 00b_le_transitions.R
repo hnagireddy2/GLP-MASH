@@ -57,7 +57,7 @@ le_trial_high <- .named(le_trial_rates, "hi")
 
 le_obs_low  <- .named(le_obs_rates, "lo")
 le_obs_mean <- .named(le_obs_rates, "rate")
-le_obs_high <- .named(le_obs_rates, "hi")
+le_obs_high <- .named(le_obs_rates, "hi") 
 
 ## ---- Report ----------------------------------------------------------------
 fmt <- function(df, mean_v) data.frame(
