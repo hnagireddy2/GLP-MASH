@@ -1,0 +1,2718 @@
+---
+title: "HRP_263_GLP-1_MASH_Progression_Model_VOI"
+output:
+  pdf_document:
+    latex_engine: xelatex
+date: "04-27-2026"
+---
+
+```{r}
+#############################################################
+## Markov CEA: MASH – LSM vs Semaglutide
+## Horizon: 80 Years, Monthly Cycle
+## Duration strategies: 1.5y
+## Initiation age strategies: 12, 18  
+#############################################################
+
+rm(list = ls())
+
+## Libraries
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+library(ggrepel)
+library(scales)      
+library(dampack)
+library(truncnorm)
+library(matrixStats) 
+library(reshape2)
+library(mgcv)
+library(gtools)
+
+## Colorblind-safe palette
+okabe_ito_strat <- c(
+  LSM         = "#0072B2",
+  Semaglutide = "#009E73"
+)
+
+############################################################
+######################   Functions  ########################
+############################################################
+
+prob_to_rate  <- function(p, t = 1) -(1/t) * log(1 - p)
+rate_to_prob  <- function(r, t = 1) 1 - exp(-r * t)
+row_normalize <- function(m) sweep(m, 1, rowSums(m), FUN = "/")
+clip01        <- function(x) pmin(pmax(x, 0), 0.999)
+
+############################################################
+########### Load Mortality + Background Costs ##############
+############################################################
+
+mort_cost_df <- read.csv("~/GitHub/GLP-MASH/age_mort_background_costs.csv")
+
+#############################################################
+######################## Model Specs ########################
+#############################################################
+
+cycle_length <- 1/12         # Monthly
+age_start    <- 12
+time_horizon <- 80           # 80 years of cycles
+age_end      <- age_start + time_horizon
+n_cycles     <- time_horizon / cycle_length   # 960 cycles
+
+#############################################################
+################## Health States + Initial ##################
+#############################################################
+
+v_states <- c(
+  "F0","F1","F2","F3","F4_CC","DCC",
+  "HCC","LT_Y1","LT_Y1_P","Post_LT","Dead"
+)
+n_states <- length(v_states)
+
+# Initial F2/F3 distribution based on normalizing NHANES-based F2/F3 distribution 
+v_init <- c(F0 = 0,    F1 = 0,    F2 = 0.686, F3 = 0.314,
+            F4_CC = 0, DCC = 0,   HCC = 0,
+            LT_Y1_P = 0, LT_Y1 = 0, Post_LT = 0, Dead = 0)
+
+#############################################################
+############################ Costs ##########################
+#############################################################
+
+# Annual state costs 
+costs_base <- c(
+  F0=8698, F1=8698, F2=8698, F3=10372, F4_CC=42207,
+  DCC=195156, HCC=141615,
+  LT_Y1_P=185743, LT_Y1=262900,
+  Post_LT=49851, Dead=0
+)
+
+### LT Complications 
+
+# Vector of probabilities for each LT complication 
+lt_comp_probs <- c(
+  acr=0.2, biliary_comp=0.105, HAT=0.0545, skin_infection=0.21,
+  pneumonia=0.155, bloodstream_inf=0.29, peritonitis=0.0765,
+  uti=0.17, cdiff=0.0385, other_infection=0.55,
+  VTE=0.031, reoperation=0.125, primary_nonfxn=0.226,
+  HVS=0.035, renal_failure=0.1
+)
+
+# Lower Bounds Vector 
+lt_comp_probs_low <- c(
+  acr=0.15, biliary_comp=0.02, HAT=0.019,
+  skin_infection=0.16, pneumonia=0.08, bloodstream_inf=0.19,
+  peritonitis=0.063, uti=0.16, cdiff=0.027,
+  other_infection=0.41, VTE=0.02, reoperation=0.08,
+  primary_nonfxn=0.052, HVS=0.01, renal_failure=0.05
+)
+
+lt_comp_probs_high <- c(
+  acr=0.25, biliary_comp=0.19, HAT=0.09, skin_infection=0.26,
+  pneumonia=0.23, bloodstream_inf=0.40, peritonitis=0.09,
+  uti=0.18, cdiff=0.05, other_infection=0.69, VTE=0.04,
+  reoperation=0.22, primary_nonfxn=0.40, HVS=0.06, renal_failure=0.20
+)
+
+# Vector of costs for each LT complication 
+lt_comp_cost <- c(
+  acr=28950, biliary_comp=54943, HAT=112834, skin_infection=3915,
+  pneumonia=80291, bloodstream_inf=102690, peritonitis=119762,
+  uti=68730, cdiff=46091, other_infection=68063,
+  VTE=53165, reoperation=111674, primary_nonfxn=107031,
+  HVS=73838, renal_failure=82524
+)
+
+# Lower Bounds Vector
+lt_comp_cost_low <- c(
+  acr=14476, biliary_comp=27472, HAT=56418, skin_infection=1958,
+  pneumonia=40145, bloodstream_inf=51345, peritonitis=59882,
+  uti=34366, cdiff=23046, other_infection=34032,
+  VTE=26583, reoperation=55838, primary_nonfxn=53516,
+  HVS=36919, renal_failure=41262
+)
+
+# Upper Bounds Vector
+lt_comp_cost_high <- c(
+  acr=43425, biliary_comp=82415, HAT=169252, skin_infection=5874,
+  pneumonia=120436, bloodstream_inf=154036, peritonitis=179645,
+  uti=103095, cdiff=69137, other_infection=102095,
+  VTE=79816, reoperation=167512, primary_nonfxn=160547,
+  HVS=110756, renal_failure=123785
+)
+
+### Expected added cost from LT complications
+lt_add_cost_base  <- sum(lt_comp_cost       * lt_comp_probs)
+lt_add_cost_low   <- sum(lt_comp_cost_low   * lt_comp_probs_low)
+lt_add_cost_high  <- sum(lt_comp_cost_high  * lt_comp_probs_high)
+
+costs_base["LT_Y1"]   <- costs_base["LT_Y1"]   + lt_add_cost_base
+costs_base["LT_Y1_P"] <- costs_base["LT_Y1_P"] + lt_add_cost_base
+
+### Drug costs (annual)
+cost_lsm        <- 0
+cost_sema_base  <- 6829     
+cost_sema_low   <- 2940     
+cost_sema_high  <- 13658    
+
+drug_cost <- c(
+  LSM         = cost_lsm,
+  Semaglutide = cost_sema_base   
+)
+
+#############################################################
+############### Discounting + Half-cycle ####################
+#############################################################
+
+disc_cost <- 0.03
+disc_qaly <- 0.03
+
+v_dwc <- 1/(1+disc_cost)^((0:n_cycles)*cycle_length)
+v_dwu <- 1/(1+disc_qaly)^((0:n_cycles)*cycle_length)
+v_wcc <- c(0.5, rep(1, n_cycles-1), 0.5)
+
+#############################################################
+######## Age-specific Mortality + Background Costs ##########
+#############################################################
+
+ages_states <- seq(age_start, age_end, by=cycle_length)
+ages_cycles <- ages_states[-length(ages_states)]
+
+## Overall background mortality (annual) -> monthly
+## prob_to_rate -> rate_to_prob 
+v_p_bg_annual <- approx(mort_cost_df$Age,
+                        mort_cost_df$overall_mortality_avg,
+                        ages_cycles, rule=2)$y
+
+v_r_bg_annual <- prob_to_rate(v_p_bg_annual)               # hazard per year
+v_p_bg_month  <- rate_to_prob(v_r_bg_annual, cycle_length) # monthly prob
+
+## Background costs
+v_background_cost_annual <-
+  approx(mort_cost_df$Age,
+         mort_cost_df$background_cost_2025,
+         ages_cycles, rule = 2)$y   
+
+v_background_cost_month <- v_background_cost_annual / 12
+
+#############################################################
+########################## Utilities ########################
+#############################################################
+
+age_vec <- c(12,25,35,45,55,65,75)
+
+util_age_base <- c(0.919,0.911,0.841,0.816,0.815,0.824,0.811)
+qaly_dec_base <- c(
+  Healthy=0, F0=0.016, F1=0.016, F2=0.016, F3=0.145, F4_CC=0.145,
+  HCC=0.165, DCC=0.155, LT_Y1=0.286, LT_Y1_P=0.286,
+  Post_LT=0.036, Dead=1
+)
+
+## Linear interpolation across ages 
+v_util_age_base <- approx(age_vec, util_age_base, ages_states, rule=2)$y
+
+state_order_for_util <- c(
+  "F0","F1","F2","F3","F4_CC","HCC",
+  "DCC","LT_Y1","LT_Y1_P","Post_LT","Dead"
+)
+
+#Builds age x state utility matrix (961 x 11) 
+build_util_matrix <- function(v_util_age, qdec){
+  m <- sapply(state_order_for_util, function(st) {
+    if (st=="Dead") rep(0,length(v_util_age))
+    else pmax(v_util_age - qdec[st], 0)
+  })
+  colnames(m) <- state_order_for_util
+  m
+}
+
+#Call function and store results 
+m_util_base <- build_util_matrix(v_util_age_base, qaly_dec_base)
+```
+
+```{r}
+#############################################################
+################### TRANSITION PROBABILITIES ################
+#############################################################
+# Baseline MONTHLY transition probabilities.
+# Fibrosis transitions (F0-F4) are placeholders here; they will be
+# replaced by the best of the candidate parameter sets determined by the calibration below.
+# Transitions to HCC, DCC, LT, death are fixed inputs and held constant throughout.
+
+# Function for annual probability -> monthly probability
+annual_to_month <- function(p_annual) {
+  rate_to_prob(prob_to_rate(p_annual), cycle_length)
+}
+
+# ---- Fixed annual transition probabilities ----
+nonfib_annual <- list(
+  F3_HCC        = 0.0034,   
+  F4_HCC        = 0.0378,   
+  F4_DCC        = 0.0659,   
+  DCC_HCC       = 0.0378,   
+  DCC_LT        = 0.023,   
+  DCC_Death     = 0.1549,     
+  HCC_LT        = 0.03,   
+  HCC_Death     = 0.3488,     
+  F4_LT         = 0.0,      
+  DCC_RegressF4 = 0.0,      
+  HCC_RegressF4 = 0.0,      
+  LT1_to_PostLT = 1.0,      
+  LT1P_to_PostLT= 1.0,
+  LT_Death      = 0.0909     
+)
+
+# Convert to monthly probabilities (except the deterministic post-LT ones)
+p_prog_month <- list(
+  
+  # ---- Fibrosis transitions: pre-calibration placeholder zeros ----
+  F0_F1 = 0, F1_F0 = 0, F1_F2 = 0, F2_F1 = 0,
+  F2_F3 = 0, F3_F2 = 0, F3_F4 = 0, F4_F3 = 0,
+
+  # ---- Fixed transitions ----
+  F3_HCC        = annual_to_month(nonfib_annual$F3_HCC),
+  F4_HCC        = annual_to_month(nonfib_annual$F4_HCC),
+  F4_DCC        = annual_to_month(nonfib_annual$F4_DCC),
+  DCC_HCC       = annual_to_month(nonfib_annual$DCC_HCC),
+  DCC_LT        = annual_to_month(nonfib_annual$DCC_LT),
+  DCC_Death     = annual_to_month(nonfib_annual$DCC_Death),
+  HCC_LT        = annual_to_month(nonfib_annual$HCC_LT),
+  HCC_Death     = annual_to_month(nonfib_annual$HCC_Death),
+  F4_LT         = annual_to_month(nonfib_annual$F4_LT),
+  DCC_RegressF4 = annual_to_month(nonfib_annual$DCC_RegressF4),
+  HCC_RegressF4 = annual_to_month(nonfib_annual$HCC_RegressF4),
+  LT1_to_PostLT = nonfib_annual$LT1_to_PostLT,
+  LT1P_to_PostLT= nonfib_annual$LT1P_to_PostLT,
+  LT_Death      = annual_to_month(nonfib_annual$LT_Death),
+  PostLT_Death  = rate_to_prob(0.036, cycle_length)
+)
+```
+
+```{r}
+#############################################################
+###################    TREATMENT EFFECTS   ##################
+#############################################################
+
+treatments <- c("LSM","Semaglutide")
+all_strat_labels <- c(
+  "LSM",
+  "Sema 72w (Age 12)",
+  "Sema 72w (Age 18)"
+)
+
+## Semaglutide progression effect (vs LSM)
+rr_sema_progress <- 0.6097
+
+## Semaglutide regression effect (vs LSM) 
+rr_sema_regress  <- 1.5625
+
+rr_regress <- c(
+  LSM         = 1.0,
+  Semaglutide = rr_sema_regress
+)
+
+rr_progress <- c(
+  LSM         = 1.0,
+  Semaglutide = rr_sema_progress
+)
+```
+
+```{r}
+#############################################################
+######################## CYCLE TRANSITION ###################
+#############################################################
+
+build_cycle_P <- function(rr_regress_now, rr_progress_now, age_t,
+                          p_prog_month_local = p_prog_month) {
+  
+  P <- matrix(0, n_states, n_states, dimnames=list(v_states,v_states))
+
+### Fibrosis progression — progression RR applies only to F2->F3
+P["F0","F1"]    <- clip01(p_prog_month_local$F0_F1)                     
+P["F1","F2"]    <- clip01(p_prog_month_local$F1_F2)                     
+P["F2","F3"]    <- clip01(p_prog_month_local$F2_F3 * rr_progress_now)   
+P["F3","F4_CC"] <- clip01(p_prog_month_local$F3_F4)                     
+
+### Fibrosis regression — regression RR applies to F2->F1 and F3->F2
+P["F1","F0"]    <- clip01(p_prog_month_local$F1_F0)                     
+P["F2","F1"]    <- clip01(p_prog_month_local$F2_F1 * rr_regress_now)    
+P["F3","F2"]    <- clip01(p_prog_month_local$F3_F2 * rr_regress_now)    
+P["F4_CC","F3"] <- clip01(p_prog_month_local$F4_F3)                                 
+  
+  ### Advanced liver routes 
+  P["F3","HCC"]    <- clip01(p_prog_month_local$F3_HCC)
+  P["F4_CC","HCC"] <- clip01(p_prog_month_local$F4_HCC)
+  P["F4_CC","DCC"] <- clip01(p_prog_month_local$F4_DCC)
+  P["DCC","HCC"]   <- clip01(p_prog_month_local$DCC_HCC)
+  
+  ### Death from DC / HCC / LT / Post-LT
+  P["DCC","Dead"]     <- clip01(p_prog_month_local$DCC_Death)
+  P["HCC","Dead"]     <- clip01(p_prog_month_local$HCC_Death)
+  P["LT_Y1","Dead"]   <- clip01(p_prog_month_local$LT_Death)
+  P["LT_Y1_P","Dead"] <- clip01(p_prog_month_local$LT_Death)
+  P["Post_LT","Dead"] <- clip01(p_prog_month_local$PostLT_Death)  
+  
+  ### Liver transplant
+  P["F4_CC","LT_Y1"] <- clip01(p_prog_month_local$F4_LT)
+  P["DCC","LT_Y1"]   <- clip01(p_prog_month_local$DCC_LT)
+  P["HCC","LT_Y1"]   <- clip01(p_prog_month_local$HCC_LT)
+  
+  ### LT → Post-LT
+  P["LT_Y1","Post_LT"]   <- clip01(p_prog_month_local$LT1_to_PostLT)
+  P["LT_Y1_P","Post_LT"] <- clip01(p_prog_month_local$LT1P_to_PostLT)
+  P
+}
+```
+
+```{r}
+##############################################################
+################### BUILD 4D TRANSITION ARRAY ################
+##############################################################
+
+build_a_P <- function(rr_reg, rr_prog,
+                      p_prog_month_local = p_prog_month,
+                      treat_dur_cycles   = NULL,
+                      treat_start_cycles = NULL) {
+
+  if(is.null(treat_dur_cycles)){
+    treat_dur_cycles <- base_treat_dur_cycles
+  }
+  # Default: treatment starts at cycle 1 for all strategies
+  if(is.null(treat_start_cycles)){
+    treat_start_cycles <- setNames(rep(1L, length(treatments)), treatments)
+  }
+
+  a_P <- array(0,
+               dim=c(n_states,n_states,n_cycles,length(treatments)),
+               dimnames=list(v_states,v_states,1:n_cycles,treatments))
+
+  for(stg in treatments){
+    
+    dur_stg   <- treat_dur_cycles[stg]
+    start_stg <- treat_start_cycles[stg]
+
+    for(t in 1:n_cycles){
+
+      age_t <- age_start + (t-1)*cycle_length
+
+      # Apply treatment RR between start_stg and start_stg + dur_stg - 1
+      # Default: start_stg = 1 
+      if(dur_stg > 0 && t >= start_stg && t < (start_stg + dur_stg)){
+        rrreg <- rr_reg[stg]
+        rrprog<- rr_prog[stg]
+      } else {
+        rrreg <- 1.0
+        rrprog<- 1.0
+      }
+
+      P <- build_cycle_P(rrreg, rrprog, age_t, p_prog_month_local)
+
+      ### Add age-specific background mortality 
+      p_bg_t <- v_p_bg_month[t]
+
+      for (s in v_states[v_states != "Dead"]) {
+        base_p_death   <- P[s, "Dead"]
+        # Combine baseline disease-specific prob with background mortality
+        p_total_death  <- 1 - (1 - base_p_death) * (1 - p_bg_t)
+        P[s, "Dead"]   <- clip01(p_total_death)
+      }
+
+      # Dead 
+      P["Dead",]       <- 0
+      P["Dead","Dead"] <- 1
+
+      ### Stay probabilities
+      for(s in v_states){
+        if(s != "Dead"){
+          row_sum <- sum(P[s,])
+          if(row_sum >= 1){
+            # rescale non-self transitions to sum to 1
+            P[s,] <- P[s,] / row_sum
+          } else {
+            P[s,s] <- 1 - row_sum
+          }
+        }
+      }
+
+      P <- row_normalize(P)
+      a_P[,,t,stg] <- P
+    }
+  }
+
+  a_P
+}
+```
+
+```{r}
+#############################################################
+####################### CALIBRATION #########################
+#############################################################
+
+# ---- 1. ESSENCE trial parameters ----
+N_trial       <- 266
+obs_regress   <- 59        # "true" observed regressions
+obs_regress_c <- 50        # secondary: missing-biopsy-as-non-responder
+weeks_trial   <- 72
+n_cyc_trial   <- round(weeks_trial / 52 / cycle_length)  
+
+v_init_essence <- c(F0 = 0, F1 = 0, F2 = 0.313, F3 = 0.687, F4_CC = 0,
+                    DCC = 0, HCC = 0, LT_Y1 = 0, LT_Y1_P = 0,
+                    Post_LT = 0, Dead = 0)
+
+# ---- 2. HCC/DCC transitions (shared across all sets) ----
+hcc_dcc_shared <- c(
+  F3_HCC  = 0.0034,
+  F4_DCC  = 0.0378,
+  F4_HCC  = 0.0659,
+  DCC_HCC = 0.0069
+)
+
+# ---- 3. Fibrosis transition sets (annual probabilities) ----
+
+# Observational (Le et al. 2023, observational subset)
+le_obs_low <- c(
+  F0_F1 = 0.0644, F1_F0 = 0.0284, F1_F2 = 0.0772, F2_F1 = 0.0452,
+  F2_F3 = 0.0689, F3_F2 = 0.1046, F3_F4 = 0.0599, F4_F3 = 0.0519
+)
+le_obs_mean <- c(
+  F0_F1 = 0.0978, F1_F0 = 0.0427, F1_F2 = 0.0979, F2_F1 = 0.0637,
+  F2_F3 = 0.0905, F3_F2 = 0.1266, F3_F4 = 0.0778, F4_F3 = 0.0763
+)
+le_obs_high <- c(
+  F0_F1 = 0.1312, F1_F0 = 0.0569, F1_F2 = 0.1186, F2_F1 = 0.0821,
+  F2_F3 = 0.1120, F3_F2 = 0.1485, F3_F4 = 0.0957, F4_F3 = 0.1007
+)
+
+# RCT (Le et al. 2023, RCT subset) 
+le_trial_low <- c(
+  F0_F1 = 0.0897, F1_F0 = 0.0723, F1_F2 = 0.1254, F2_F1 = 0.1384,
+  F2_F3 = 0.1193, F3_F2 = 0.1210, F3_F4 = 0.0440, F4_F3 = 0.0450
+)
+le_trial_mean <- c(
+  F0_F1 = 0.1739, F1_F0 = 0.1193, F1_F2 = 0.2243, F2_F1 = 0.1910,
+  F2_F3 = 0.1689, F3_F2 = 0.1580, F3_F4 = 0.0763, F4_F3 = 0.0807
+)
+le_trial_high <- c(
+  F0_F1 = 0.3236, F1_F0 = 0.1935, F1_F2 = 0.3818, F2_F1 = 0.2599,
+  F2_F3 = 0.2359, F3_F2 = 0.2047, F3_F4 = 0.1306, F4_F3 = 0.1639
+)
+
+# Combine Le et al. and fixed HCC/DCC parameters into full sets
+candidate_sets <- lapply(
+  list(obs_low    = le_obs_low,
+       obs        = le_obs_mean,
+       obs_high   = le_obs_high,
+       trial_low  = le_trial_low,
+       trial      = le_trial_mean,
+       trial_high = le_trial_high),
+  function(x) c(x, hcc_dcc_shared)
+)
+
+# ---- 4. Convert annual probabilities -> monthly probabilities ----
+build_p_prog_from_annual <- function(vals_annual, p_prog_template) {
+  pp <- p_prog_template  
+  for (nm in names(vals_annual)) {
+    pp[[nm]] <- rate_to_prob(prob_to_rate(vals_annual[[nm]]), cycle_length)
+  }
+  pp
+}
+
+# ---- 5. Run ESSENCE cohort from a single starting state ----
+run_single_start <- function(p_prog_local, start_state) {
+  v0 <- setNames(rep(0, n_states), v_states)
+  v0[start_state] <- 1
+
+  aP <- build_a_P(
+    rr_reg             = c(LSM = 1, Semaglutide = 1),
+    rr_prog            = c(LSM = 1, Semaglutide = 1),
+    p_prog_month_local = p_prog_local,
+    treat_dur_cycles   = c(LSM = 0L, Semaglutide = 0L),
+    treat_start_cycles = c(LSM = 1L, Semaglutide = 1L)
+  )
+
+  m_tr <- matrix(0, nrow = n_cyc_trial + 1, ncol = n_states,
+                 dimnames = list(NULL, v_states))
+  m_tr[1, ] <- v0
+
+  for (t in 1:n_cyc_trial) {
+    m_tr[t + 1, ] <- m_tr[t, ] %*% aP[,,t,"LSM"]
+  }
+  m_tr[n_cyc_trial + 1, ]
+}
+
+# ---- 6. Predicted proportion with fibrosis regression at week 72 ----
+predict_regression <- function(p_prog_local) {
+  final_F2 <- run_single_start(p_prog_local, "F2")
+  final_F3 <- run_single_start(p_prog_local, "F3")
+
+  p_reg_F2 <- sum(final_F2[c("F0", "F1")])           
+  p_reg_F3 <- sum(final_F3[c("F0", "F1", "F2")])    
+
+  p_reg_total <- 0.313 * p_reg_F2 + 0.687 * p_reg_F3
+  expected_n  <- p_reg_total * N_trial
+
+  ci_lo <- qbinom(0.025, N_trial, p_reg_total)
+  ci_hi <- qbinom(0.975, N_trial, p_reg_total)
+
+  list(p_reg_total = p_reg_total,
+       expected_n  = expected_n,
+       ci_lo       = ci_lo,
+       ci_hi       = ci_hi,
+       p_reg_F2    = p_reg_F2,
+       p_reg_F3    = p_reg_F3)
+}
+
+# ---- 7. Calibration loop: fibrosis regression ----
+results <- data.frame(
+  set        = character(),
+  p_reg_F2   = numeric(),
+  p_reg_F3   = numeric(),
+  p_reg_mix  = numeric(),
+  expected_n = numeric(),
+  ci_lo      = integer(),
+  ci_hi      = integer(),
+  hits_59    = logical(),
+  hits_50    = logical(),
+  diff_59    = numeric(),
+  stringsAsFactors = FALSE
+)
+
+for (nm in names(candidate_sets)) {
+  pp  <- build_p_prog_from_annual(candidate_sets[[nm]], p_prog_month)
+  out <- predict_regression(pp)
+  results <- rbind(results, data.frame(
+    set        = nm,
+    p_reg_F2   = round(out$p_reg_F2, 3),
+    p_reg_F3   = round(out$p_reg_F3, 3),
+    p_reg_mix  = round(out$p_reg_total, 3),
+    expected_n = round(out$expected_n, 1),
+    ci_lo      = out$ci_lo,
+    ci_hi      = out$ci_hi,
+    hits_59    = (59 >= out$ci_lo) & (59 <= out$ci_hi),
+    hits_50    = (50 >= out$ci_lo) & (50 <= out$ci_hi),
+    diff_59    = round(out$expected_n - 59, 1)
+  ))
+}
+
+cat("\n========== ESSENCE Calibration: Fibrosis Regression ==========\n")
+cat("Observed regressions (true):         59 / 266\n")
+cat("Observed regressions (missing = non-responder): 50 / 266\n\n")
+print(results, row.names = FALSE)
+
+# ---- 8. Pick the best-fitting parameter set ----
+results$diff_50 <- round(results$expected_n - 50, 1)
+best <- results$set[which.min(abs(results$diff_50))]
+cat("\nBest-fitting parameter set (closest to 50):", best, "\n")
+
+# ---- 9. Plot: regression calibration ----
+library(ggplot2)
+results$set <- factor(results$set,
+                      levels = c("obs_low", "obs", "obs_high",
+                                 "trial_low", "trial", "trial_high"))
+
+ggplot(results, aes(x = set, y = expected_n)) +
+  geom_point(size = 3, color = "#0072B2") +
+  geom_errorbar(aes(ymin = ci_lo, ymax = ci_hi), width = 0.2,
+                color = "#0072B2", linewidth = 0.8) +
+  geom_hline(yintercept = 59, linetype = "dashed", linewidth = 0.8) +
+  geom_hline(yintercept = 50, linetype = "dotted",  linewidth = 0.6) +
+  annotate("text", x = 6.3, y = 59, label = "True = 59",
+           hjust = 0, size = 3.5) +
+  annotate("text", x = 6.3, y = 50, label = "missing as non-responders = 50",
+           hjust = 0, size = 3.5) +
+  labs(x     = "Transition Probabilities Source",
+       y     = "Number of Individuals\nwith Fibrosis Regression",
+       title = "ESSENCE Calibration: Candidate Parameter Sets vs Observed") +
+  theme_bw(base_size = 13) +
+  theme(plot.margin = margin(5, 60, 5, 5))
+
+# ---- 10. Commit the best candidate set to p_prog_month ----
+best_annual <- candidate_sets[[best]]
+p_prog_month <- build_p_prog_from_annual(best_annual, p_prog_month)
+
+cat("\nFibrosis transitions in p_prog_month now set to '", best,
+    "' from the calibration.\n", sep = "")
+
+
+#############################################################
+############### VALIDATION: F2 PROGRESSION ##################
+#############################################################
+# ESSENCE Supplementary Table S6 (Sanyal et al. 2025):
+# Progression of liver fibrosis in participants with fibrosis stage F2 at baseline — Placebo: 29 (35.6%), N=81 
+# Note: counts include multiple reference-based imputation for missing week-72 biopsies (Table S6 footnote).
+
+N_F2_placebo    <- 81
+obs_progress_F2 <- 29
+
+predict_progression_F2 <- function(p_prog_local) {
+  final_F2 <- run_single_start(p_prog_local, "F2")
+  p_prog   <- sum(final_F2[c("F3", "F4_CC", "DCC", "HCC",
+                              "LT_Y1", "LT_Y1_P", "Post_LT")])
+
+  expected_n <- p_prog * N_F2_placebo
+  ci_lo <- qbinom(0.025, N_F2_placebo, p_prog)
+  ci_hi <- qbinom(0.975, N_F2_placebo, p_prog)
+
+  list(p_prog = p_prog, expected_n = expected_n,
+       ci_lo = ci_lo, ci_hi = ci_hi)
+}
+
+pp_chosen   <- build_p_prog_from_annual(candidate_sets[[best]], p_prog_month)
+val_F2_prog <- predict_progression_F2(pp_chosen)
+
+cat("\n=== Validation: F2 Progression in ESSENCE Placebo ===\n")
+cat("Source:    Table S6, Sanyal et al. NEJM 2025 supplement\n")
+cat("Observed:  ", obs_progress_F2, "/", N_F2_placebo, "\n", sep = "")
+cat("Predicted: ", round(val_F2_prog$expected_n, 1),
+    " (95% CI: ", val_F2_prog$ci_lo, "-", val_F2_prog$ci_hi, ")\n", sep = "")
+
+```
+```{r}
+###############################################################
+####### TIME-TO-SEVERE-DISEASE VALIDATION OF ALL STATES #######
+###############################################################
+
+target_hagstrom <- data.frame(
+  start_stage  = c("F0", "F1", "F2", "F3", "F4_CC"),
+  time_low     = c(25, 20, 13, 7,  3),
+  time_high    = c(35, 30, 22, 13, 7)
+)
+
+# ---- Run single-stage cohort, find time to 10% severe ----
+# Severe = DCC + HCC + LT_Y1 + LT_Y1_P + Post_LT + Dead-from-liver
+
+time_to_severe <- function(start_state, threshold = 0.10) {
+  
+  v_init_val <- setNames(rep(0, n_states), v_states)
+  v_init_val[start_state] <- 1
+  
+  aP_val <- build_a_P(
+    rr_reg             = c(LSM = 1, Semaglutide = 1),
+    rr_prog            = c(LSM = 1, Semaglutide = 1),
+    p_prog_month_local = p_prog_month,
+    treat_dur_cycles   = c(LSM = 0L, Semaglutide = 0L),
+    treat_start_cycles = c(LSM = 1L, Semaglutide = 1L)
+  )
+  
+  m_tr <- matrix(0, nrow = n_cycles + 1, ncol = n_states,
+                 dimnames = list(NULL, v_states))
+  m_tr[1, ] <- v_init_val
+  
+  for (t in 1:n_cycles) {
+    m_tr[t + 1, ] <- m_tr[t, ] %*% aP_val[,,t,"LSM"]
+  }
+  
+severe_states <- c("DCC", "HCC", "LT_Y1", "LT_Y1_P", "Post_LT")
+
+# Cumulative: 1 minus those still in fibrosis states (never reached severe)
+fibrosis_states <- c("F0", "F1", "F2", "F3", "F4_CC")
+pct_severe <- 1 - rowSums(m_tr[, fibrosis_states])
+
+  # Find first cycle where pct_severe >= threshold
+  cycle_at_threshold <- which(pct_severe >= threshold)[1]
+  
+  if (is.na(cycle_at_threshold)) {
+    return(NA_real_)   # cohort never reaches threshold within horizon
+  }
+  
+  # Convert cycle to years
+  years_at_threshold <- (cycle_at_threshold - 1) * cycle_length
+  years_at_threshold
+}
+
+# ---- Run Hagstrom validation for each starting stage ----
+val2_results <- data.frame(
+  Stage      = c("F0", "F1", "F2", "F3", "F4_CC"),
+  Years_to_10pct_severe = sapply(c("F0", "F1", "F2", "F3", "F4_CC"),
+                                  time_to_severe, threshold = 0.10)
+)
+
+val2_results <- merge(val2_results, target_hagstrom,
+                       by.x = "Stage", by.y = "start_stage", all.x = TRUE)
+
+val2_results$Pass <- with(val2_results,
+  ifelse(is.na(Years_to_10pct_severe), "Not reached",
+    ifelse(Years_to_10pct_severe >= time_low &
+           Years_to_10pct_severe <= time_high, "PASS", "FAIL"))
+)
+
+cat("\n==========================================================\n")
+cat(" VALIDATION 2: Hagstrom 2017 Time-to-Severe-Disease\n")
+cat("==========================================================\n")
+cat(" Question: Does our chosen transition set reproduce\n")
+cat("           Hagstrom et al. observed times to severe disease?\n\n")
+cat(" Severe disease = DCC, HCC, LT, or post-LT (liver outcomes)\n")
+cat(" Threshold      = 10% of cohort reaches severe disease\n\n")
+print(val2_results, row.names = FALSE)
+cat("==========================================================\n\n")
+
+
+# Plot: Time-to-severe trajectories for each starting stage
+plot_severe_trajectory <- function() {
+  
+  starting_stages <- c("F0", "F1", "F2", "F3", "F4_CC")
+  
+  trajectories <- lapply(starting_stages, function(stg) {
+    v_init_val <- setNames(rep(0, n_states), v_states)
+    v_init_val[stg] <- 1
+    
+    aP_val <- build_a_P(
+      rr_reg             = c(LSM = 1, Semaglutide = 1),
+      rr_prog            = c(LSM = 1, Semaglutide = 1),
+      p_prog_month_local = p_prog_month,
+      treat_dur_cycles   = c(LSM = 0L, Semaglutide = 0L),
+      treat_start_cycles = c(LSM = 1L, Semaglutide = 1L)
+    )
+    
+    m_tr <- matrix(0, nrow = n_cycles + 1, ncol = n_states,
+                   dimnames = list(NULL, v_states))
+    m_tr[1, ] <- v_init_val
+    
+    for (t in 1:n_cycles) {
+      m_tr[t + 1, ] <- m_tr[t, ] %*% aP_val[,,t,"LSM"]
+    }
+    
+    severe_states <- c("DCC", "HCC", "LT_Y1", "LT_Y1_P", "Post_LT")
+    pct_severe    <- rowSums(m_tr[, severe_states])
+    
+    data.frame(
+      Stage      = stg,
+      Year       = (0:n_cycles) * cycle_length,
+      PctSevere  = pct_severe
+    )
+  })
+  
+  df_traj <- do.call(rbind, trajectories) %>%
+    filter(Year <= 40)   # 40-year horizon for readability
+  
+  ggplot(df_traj, aes(x = Year, y = PctSevere, color = Stage)) +
+    geom_line(linewidth = 1) +
+    geom_hline(yintercept = 0.10, linetype = "dashed", color = "gray40") +
+    annotate("text", x = 35, y = 0.105, label = "10% threshold",
+             hjust = 0, size = 3.5, color = "gray40") +
+    scale_x_continuous("Years from baseline", breaks = seq(0, 40, by = 5)) +
+    scale_y_continuous("Cumulative proportion in severe disease",
+                       labels = percent_format(), limits = c(0, 0.5)) +
+    scale_color_manual(
+      values = c(F0 = "#56B4E9", F1 = "#0072B2", F2 = "#009E73",
+                 F3 = "#E69F00", F4_CC = "#D55E00")
+    ) +
+    labs(title = "Time-to-Severe-Disease by Baseline Fibrosis Stage",
+         subtitle = "Each curve: cohort starting 100% at the indicated stage, no treatment",
+         color = "Baseline Stage") +
+    theme_bw(base_size = 13) +
+    theme(legend.position = "right")
+}
+
+plot_severe_trajectory()
+```
+```{r}
+#############################################################
+######## OWSA bounds: Le et al. observational range #########
+#############################################################
+# Build low/high observational transition sets for OWSA from candidate sets (defined in calibration chunk above).
+
+p_prog_month_le_low  <- build_p_prog_from_annual(candidate_sets$obs_low,
+                                                 p_prog_month)
+p_prog_month_le_high <- build_p_prog_from_annual(candidate_sets$obs_high,
+                                                 p_prog_month)
+```
+```{r}
+#############################################################
+########################  Markov Model  #####################
+#############################################################
+
+run_markov <- function(P4d_single, v_init){
+
+  m_M <- matrix(NA, nrow=n_cycles+1, ncol=n_states,
+                dimnames=list(0:n_cycles, v_states))
+
+  m_M[1,] <- v_init[v_states]
+
+  for(t in 1:n_cycles){
+    m_M[t+1,] <- m_M[t,] %*% P4d_single[,,t]
+  }
+
+  m_M
+}
+```
+```{r}
+##############################################################
+########################### SCENARIOS ########################
+##############################################################
+
+# Only one duration: 72 weeks (ESSENCE trial duration)
+treat_dur_72w_years <- 72/52   # ≈ 1.385 years
+
+treat_dur_72w_cycles <- c(LSM = 0L,
+                          Semaglutide = round(treat_dur_72w_years / cycle_length))
+# ≈ 17 monthly cycles
+
+base_treat_dur_cycles <- treat_dur_72w_cycles
+
+# Delay from age 12 to age 18 (6 years = 72 cycles)
+delay_to_18_cycles <- round((18 - 12) / cycle_length)
+
+treat_start_immediate <- c(LSM = 1L, Semaglutide = 1L)
+treat_start_age18     <- c(LSM = 1L, Semaglutide = delay_to_18_cycles + 1L)
+```
+```{r}
+#############################################################
+######################## OUTCOMES ###########################
+#############################################################
+
+summarize_outcomes <- function(trace, drug_cost_per_year,
+                               util_matrix, bg_cost_month,
+                               cost_vector,
+                               treat_dur_cycles) {
+
+  util_mat <- util_matrix[, v_states]
+
+  # State costs
+  v_cost_state_annual <- trace %*% matrix(cost_vector[v_states], ncol=1)
+  v_cost_state_cycle  <- v_cost_state_annual * cycle_length
+
+# Drug cost: charge monthly cost for each on-treatment cycle
+  cost_per_cycle <- drug_cost_per_year * cycle_length
+  on_vec <- rep(0, n_cycles + 1)
+  if (treat_dur_cycles > 0) {
+    idx_end <- min(treat_dur_cycles, n_cycles + 1)
+    on_vec[1:idx_end] <- 1
+  }
+  v_cost_drug_cycle <- on_vec * cost_per_cycle
+
+  # Background cost 
+  alive <- 1 - trace[, "Dead"]
+  bg_cost_extended <- c(bg_cost_month[1], bg_cost_month)   # pad to n_cycles + 1
+  v_bg_cost_cycle <- bg_cost_extended * alive
+
+  # Total cost
+  v_cost_total <- v_cost_state_cycle + v_cost_drug_cycle + v_bg_cost_cycle
+
+  # QALYs
+  v_qaly_state <- rowSums(trace * util_mat)
+
+  # Life-years (1 - Dead)
+  LY <- rowSums(trace[, v_states != "Dead"])
+
+  # Discount + half-cycle
+  tot_LY   <- sum(LY * v_wcc * v_dwu) * cycle_length
+  tot_QALY <- sum(v_qaly_state * v_wcc * v_dwu) * cycle_length
+  tot_cost <- sum(v_cost_total * v_wcc * v_dwc)
+
+  c(LY=tot_LY, QALY=tot_QALY, Cost=tot_cost)
+}
+
+```
+
+```{r}
+#############################################################
+################# SUMMARIZE STRATEGIES ######################
+#############################################################
+
+summarize_strategies <- function(traces_list, scenario_name,
+                                 util_matrix, bg_cost_month,
+                                 cost_vector, drug_cost_vec,
+                                 treat_dur_cycles_vec) {
+
+  res_mat <- sapply(treatments, function(stg){
+
+    summarize_outcomes(
+      trace              = traces_list[[stg]],
+      drug_cost_per_year = drug_cost_vec[stg],
+      util_matrix        = util_matrix,
+      bg_cost_month      = bg_cost_month,
+      cost_vector        = cost_vector,
+      treat_dur_cycles   = treat_dur_cycles_vec[stg]
+    )
+  })
+
+  df <- as.data.frame(t(res_mat))
+  df$Strategy <- rownames(df)
+  df$Scenario <- scenario_name
+  df[, c("Scenario","Strategy","Cost","QALY","LY")]
+}
+```
+```{r}
+#############################################################
+################ ICER vs LSM function (OWSA) ################
+#############################################################
+
+icer_vs_lsm <- function(res_df){
+  lsm  <- res_df[res_df$Strategy == "LSM", ]
+  sema <- res_df[res_df$Strategy == "Semaglutide", ]
+  if (nrow(lsm) == 0 || nrow(sema) == 0) return(NA_real_)
+  dCost <- sema$Cost - lsm$Cost
+  dQALY <- sema$QALY - lsm$QALY
+  if (dQALY == 0) return(NA_real_)
+  dCost / dQALY
+}
+```
+
+```{r}
+#############################################################
+################ GENERIC ICER FUNCTION ######################
+#############################################################
+
+run_owsa_icer <- function(rr_regress_vec      = rr_regress,
+                          rr_progress_vec     = rr_progress,
+                          util_matrix         = m_util_base,
+                          cost_vector         = costs_base,
+                          drug_cost_vec       = drug_cost,
+                          bg_cost_month_vec   = v_background_cost_month,
+                          p_prog_month_local  = p_prog_month,
+                          treat_dur_cycles_vec = base_treat_dur_cycles,
+                          treat_start_cycles   = treat_start_immediate,
+                          v_init_vec          = v_init) {
+
+  a_P_loc <- build_a_P(rr_regress_vec, rr_progress_vec,
+                       p_prog_month_local,
+                       treat_dur_cycles   = treat_dur_cycles_vec,
+                       treat_start_cycles = treat_start_cycles)
+
+  traces_loc <- lapply(treatments, function(stg) {
+    run_markov(a_P_loc[,,,stg], v_init_vec)
+  })
+  names(traces_loc) <- treatments
+
+  res_loc <- summarize_strategies(
+    traces_loc, "SA",
+    util_matrix,
+    bg_cost_month_vec,
+    cost_vector,
+    drug_cost_vec,
+    treat_dur_cycles_vec
+  )
+
+  icer_vs_lsm(res_loc)
+}
+
+```
+
+```{r}
+#############################################################
+############# One-Way Sensitivity Analysis ##################
+#############################################################
+
+owsa_params <- list()
+
+###### 1. Transition probabilities (from obs. data)
+
+icer_progobs_lo <- run_owsa_icer(
+  p_prog_month_local = p_prog_month_le_low
+)
+icer_progobs_hi <- run_owsa_icer(
+  p_prog_month_local = p_prog_month_le_high
+)
+owsa_params[["baseline_transitions"]] <- c(
+  low  = icer_progobs_lo,
+  high = icer_progobs_hi
+)
+
+###### 2. Semaglutide efficacy (regression RR) – base vs trial RR
+rr_reg_base <- rr_regress["Semaglutide"]
+rr_reg_SA   <- 1.728240524
+
+rr_reg_lo <- rr_regress; rr_reg_lo["Semaglutide"] <- rr_reg_base         
+rr_reg_hi <- rr_regress; rr_reg_hi["Semaglutide"] <- rr_reg_SA           
+
+icer_sema_lo <- run_owsa_icer(rr_regress_vec = rr_reg_lo,
+                                       rr_progress_vec = rr_progress)
+icer_sema_hi <- run_owsa_icer(rr_regress_vec = rr_reg_hi,
+                                       rr_progress_vec = rr_progress)
+owsa_params[["sema_efficacy"]] <- c(low = icer_sema_lo,
+                                       high = icer_sema_hi)
+
+###### 3. State-specific medical costs (0.75x vs 1.25x)
+cost_lo <- costs_base * 0.75
+cost_hi <- costs_base * 1.25
+
+icer_cost_lo <- run_owsa_icer(cost_vector = cost_lo)
+icer_cost_hi <- run_owsa_icer(cost_vector = cost_hi)
+owsa_params[["state_costs"]] <- c(low = icer_cost_lo,
+                                     high = icer_cost_hi)
+
+###### 4. LT complication costs (prob-weighted, low/high bounds)
+costs_lt_lo <- costs_base
+costs_lt_hi <- costs_base
+for (st in c("LT_Y1","LT_Y1_P")) {
+  costs_lt_lo[st] <- 452682 + lt_add_cost_low
+  costs_lt_hi[st] <- 452682 + lt_add_cost_high
+}
+
+icer_lt_lo <- run_owsa_icer(cost_vector = costs_lt_lo)
+icer_lt_hi <- run_owsa_icer(cost_vector = costs_lt_hi)
+owsa_params[["lt_comp_costs"]] <- c(low = icer_lt_lo, high = icer_lt_hi)
+
+###### 5. Annual cost of semaglutide (low = $2,940, high = $13,658)
+lo_drug <- drug_cost; lo_drug["Semaglutide"] <- cost_sema_low
+hi_drug <- drug_cost; hi_drug["Semaglutide"] <- cost_sema_high
+
+icer_treat_lo <- run_owsa_icer(drug_cost_vec = lo_drug)
+icer_treat_hi <- run_owsa_icer(drug_cost_vec = hi_drug)
+owsa_params[["sema_cost"]] <- c(low = icer_treat_lo,
+                                   high = icer_treat_hi)
+
+###### 6. Utility scale (QALYs) – 0.9x vs 1.1x
+icer_u_lo <- run_owsa_icer(util_matrix = m_util_base * 0.9)
+icer_u_hi <- run_owsa_icer(util_matrix = pmin(m_util_base * 1.1, 1))
+owsa_params[["qalys"]] <- c(low = icer_u_lo,
+                               high = icer_u_hi)
+
+base_icer <- run_owsa_icer()
+```
+
+```{r owsa-dampack, cache=TRUE}
+wtp_threshold    <- 150000
+
+#############################################################
+## DAMPACK OWSA — NMB for THREE strategies
+#############################################################
+# LSM, Sema 72w (Age 12), Sema 72w (Age 18)
+
+calculate_ce_out_mash <- function(l_params, n_wtp = wtp_threshold) {
+
+  # ---- Build local parameter copies from l_params ----
+  rr_reg_loc  <- rr_regress
+  rr_reg_loc["Semaglutide"]  <- l_params[["Semaglutide regression RR"]]
+
+  rr_prog_loc <- rr_progress
+  rr_prog_loc["Semaglutide"] <- l_params[["Semaglutide progression RR"]]
+
+  cost_loc  <- costs_base * l_params[["State medical costs (0.75x-1.25x)"]]
+
+  drug_loc  <- drug_cost
+  drug_loc["Semaglutide"] <- l_params[["Semaglutide annual cost"]]
+
+  qdec_loc     <- pmin(qaly_dec_base * l_params[["Health state utilities (0.9x-1.1x)"]], 1)
+  util_mat_loc <- build_util_matrix(v_util_age_base, qdec_loc)
+
+  prog_sc <- l_params[["Transition probabilities (0.75x-1.25x)"]]
+  p_prog_loc <- p_prog_month
+  p_prog_loc$F0_F1 <- rate_to_prob(prob_to_rate(p_prog_month$F0_F1, cycle_length) * prog_sc, cycle_length)
+  p_prog_loc$F1_F0 <- rate_to_prob(prob_to_rate(p_prog_month$F1_F0, cycle_length) * prog_sc, cycle_length)
+  p_prog_loc$F1_F2 <- rate_to_prob(prob_to_rate(p_prog_month$F1_F2, cycle_length) * prog_sc, cycle_length)
+  p_prog_loc$F2_F1 <- rate_to_prob(prob_to_rate(p_prog_month$F2_F1, cycle_length) * prog_sc, cycle_length)
+  p_prog_loc$F2_F3 <- rate_to_prob(prob_to_rate(p_prog_month$F2_F3, cycle_length) * prog_sc, cycle_length)
+  p_prog_loc$F3_F2 <- rate_to_prob(prob_to_rate(p_prog_month$F3_F2, cycle_length) * prog_sc, cycle_length)
+  p_prog_loc$F3_F4 <- rate_to_prob(prob_to_rate(p_prog_month$F3_F4, cycle_length) * prog_sc, cycle_length)
+  p_prog_loc$F4_F3 <- rate_to_prob(prob_to_rate(p_prog_month$F4_F3, cycle_length) * prog_sc, cycle_length)
+
+  # ---- Age 12 immediate ----
+  aP_12 <- build_a_P(rr_reg_loc, rr_prog_loc,
+                     p_prog_month_local = p_prog_loc,
+                     treat_dur_cycles   = treat_dur_72w_cycles,
+                     treat_start_cycles = treat_start_immediate)
+  traces_12 <- lapply(treatments, function(stg) run_markov(aP_12[,,,stg], v_init))
+  names(traces_12) <- treatments
+  res_12 <- summarize_strategies(traces_12, "Age12",
+                                 util_mat_loc, v_background_cost_month,
+                                 cost_loc, drug_loc, treat_dur_72w_cycles)
+
+  # ---- Age 18 delayed ----
+  aP_18 <- build_a_P(rr_reg_loc, rr_prog_loc,
+                     p_prog_month_local = p_prog_loc,
+                     treat_dur_cycles   = treat_dur_72w_cycles,
+                     treat_start_cycles = treat_start_age18)
+  traces_18 <- lapply(treatments, function(stg) run_markov(aP_18[,,,stg], v_init))
+  names(traces_18) <- treatments
+  res_18 <- summarize_strategies(traces_18, "Age18",
+                                 util_mat_loc, v_background_cost_month,
+                                 cost_loc, drug_loc, treat_dur_72w_cycles)
+
+  # ---- Build 3-row output ----
+  results <- list(
+    "LSM"               = c(Cost = res_12$Cost[res_12$Strategy == "LSM"],
+                            QALY = res_12$QALY[res_12$Strategy == "LSM"]),
+    "Sema 72w (Age 12)" = c(Cost = res_12$Cost[res_12$Strategy == "Semaglutide"],
+                            QALY = res_12$QALY[res_12$Strategy == "Semaglutide"]),
+    "Sema 72w (Age 18)" = c(Cost = res_18$Cost[res_18$Strategy == "Semaglutide"],
+                            QALY = res_18$QALY[res_18$Strategy == "Semaglutide"])
+  )
+
+  df_out <- data.frame(
+    Strategy = names(results),
+    Cost     = sapply(results, `[[`, "Cost"),
+    Effect   = sapply(results, `[[`, "QALY"),
+    stringsAsFactors = FALSE
+  )
+  df_out$NMB <- df_out$Effect * n_wtp - df_out$Cost
+  df_out
+}
+
+# ------------------------------------------------------------------
+# Parameter ranges 
+# ------------------------------------------------------------------
+df_params_owsa <- data.frame(
+  pars = c("Semaglutide regression RR",
+           "Semaglutide progression RR",
+           "Transition probabilities (0.75x-1.25x)",
+           "State medical costs (0.75x-1.25x)",
+           "Semaglutide annual cost",
+           "Health state utilities (0.9x-1.1x)"),
+  min = c(1.0,           rr_sema_progress, 0.75, 0.75, cost_sema_low,  0.90),
+  max = c(1.728240524,   1.0,              1.25, 1.25, cost_sema_high, 1.10)
+)
+
+# Base case parameter list
+l_params_basecase <- list(
+  "Semaglutide regression RR"              = rr_sema_regress,
+  "Semaglutide progression RR"             = rr_sema_progress,
+  "Transition probabilities (0.75x-1.25x)" = 1.0,
+  "State medical costs (0.75x-1.25x)"      = 1.0,
+  "Semaglutide annual cost"                = cost_sema_base,
+  "Health state utilities (0.9x-1.1x)"     = 1.0
+)
+
+# ------------------------------------------------------------------
+# Run dampack OWSA
+# ------------------------------------------------------------------
+owsa_nmb <- run_owsa_det(
+  params_range    = df_params_owsa,
+  params_basecase = l_params_basecase,
+  nsamp           = 100,
+  FUN             = calculate_ce_out_mash,
+  outcomes        = "NMB",
+  strategies      = all_strat_labels,
+  n_wtp           = wtp_threshold
+)
+
+# Check what calculate_ce_out_mash actually returns
+test_out <- calculate_ce_out_mash(l_params_basecase)
+cat("Strategies returned by function:\n")
+print(test_out$Strategy)
+
+cat("\nall_strat_labels passed to run_owsa_det:\n")
+print(all_strat_labels)
+
+cat("\nMatch:", identical(sort(test_out$Strategy), sort(all_strat_labels)), "\n")
+```
+```{r owsa-nmb-plot}
+# NMB OWSA plot: strategies vs LSM
+plot(owsa_nmb, txtsize = 11, n_x_ticks = 4, facet_scales = "free") +
+  labs(y = "NMB ($ per patient)") +
+  labs(
+    title    = "One-Way Sensitivity Analysis: NMB by Parameter",
+    subtitle = paste0("WTP = $150,000/QALY -- Strategies vs. LSM")
+  ) +
+  theme(legend.position = "bottom")
+```
+```{r owsa-opt-strat}
+# Optimal strategy by parameter 
+owsa_opt_strat(owsa = owsa_nmb, txtsize = 11)
+```
+```{r}
+#############################################################
+######### THRESHOLD SENSITIVITY ANALYSIS ####################
+#############################################################
+
+find_threshold <- function(param_name, base_val,
+                           lo_val, hi_val,
+                           run_fn,
+                           wtp   = wtp_threshold,
+                           tol   = 1) {
+
+  icer_lo <- run_fn(lo_val)
+  icer_hi <- run_fn(hi_val)
+
+  crossing_exists <- !is.na(icer_lo) & !is.na(icer_hi) &
+                     ((icer_lo - wtp) * (icer_hi - wtp) < 0)
+
+  if (!crossing_exists) {
+    return(data.frame(
+      Parameter  = param_name,
+      Base_Value = base_val,
+      Threshold  = NA_real_,
+      Direction  = ifelse(icer_lo > wtp & icer_hi > wtp,
+                          "Always dominated",
+                          "Always cost-effective"),
+      Base_ICER  = round(run_fn(base_val))
+    ))
+  }
+
+  a <- lo_val; b <- hi_val
+  for (iter in 1:60) {
+    mid      <- (a + b) / 2
+    icer_mid <- run_fn(mid)
+    if (is.na(icer_mid)) break
+    if (abs(icer_mid - wtp) < tol) break
+    if ((icer_mid - wtp) * (icer_lo - wtp) < 0) b <- mid else a <- mid
+  }
+
+  data.frame(
+    Parameter  = param_name,
+    Base_Value = base_val,
+    Threshold  = round(mid, 4),
+    Direction  = ifelse(run_fn(lo_val) < wtp,
+                        "CE at low; flips at threshold",
+                        "Not CE at low; flips at threshold"),
+    Base_ICER  = round(run_fn(base_val))
+  )
+}
+
+# ---- Threshold SA for non-dominated frontier strategies ----
+
+frontier_strats <- list(
+  "Sema 72w Age 12" = list(dur = treat_dur_72w_cycles,
+                           start = treat_start_immediate),
+  "Sema 72w Age 18" = list(dur = treat_dur_72w_cycles,
+                           start = treat_start_age18)
+)
+
+thresh_all_strats <- lapply(names(frontier_strats), function(strat_name) {
+  strat_info <- frontier_strats[[strat_name]]
+  dur_cyc    <- strat_info$dur
+  start_cyc  <- strat_info$start
+
+  results <- list()
+
+  results[["sema_cost"]] <- find_threshold(
+    "Semaglutide annual cost ($)", cost_sema_base, 1000, 80000,
+    run_fn = function(x) {
+      dv <- drug_cost; dv["Semaglutide"] <- x
+      run_owsa_icer(drug_cost_vec       = dv,
+                    treat_dur_cycles_vec = dur_cyc,
+                    treat_start_cycles   = start_cyc)
+    }
+  )
+
+  results[["rr_regress"]] <- find_threshold(
+    "Semaglutide regression RR", rr_sema_regress, 1.0, rr_sema_regress,
+    run_fn = function(x) {
+      rv <- rr_regress; rv["Semaglutide"] <- x
+      run_owsa_icer(rr_regress_vec       = rv,
+                    treat_dur_cycles_vec = dur_cyc,
+                    treat_start_cycles   = start_cyc)
+    }
+  )
+
+  results[["rr_progress"]] <- find_threshold(
+    "Semaglutide progression RR", rr_sema_progress, rr_sema_progress, 1.0,
+    run_fn = function(x) {
+      pv <- rr_progress; pv["Semaglutide"] <- x
+      run_owsa_icer(rr_progress_vec      = pv,
+                    treat_dur_cycles_vec = dur_cyc,
+                    treat_start_cycles   = start_cyc)
+    }
+  )
+
+  results[["h_F3_F4"]] <- find_threshold(
+    "F3->F4 annual hazard", prob_to_rate(p_prog_month$F3_F4) * 12,
+    0.01, 0.30,
+    run_fn = function(x) {
+      pm <- p_prog_month; pm$F3_F4 <- annual_to_month(x)
+      run_owsa_icer(p_prog_month_local   = pm,
+                    treat_dur_cycles_vec = dur_cyc,
+                    treat_start_cycles   = start_cyc)
+    }
+  )
+
+  results[["state_cost"]] <- find_threshold(
+    "State cost multiplier", 1.0, 0.5, 3.0,
+    run_fn = function(x) {
+      run_owsa_icer(cost_vector          = costs_base * x,
+                    treat_dur_cycles_vec = dur_cyc,
+                    treat_start_cycles   = start_cyc)
+    }
+  )
+
+  df <- dplyr::bind_rows(results)
+  df$Strategy <- strat_name
+  df
+})
+
+df_thresh_all <- dplyr::bind_rows(thresh_all_strats)
+
+# Plot: facet by strategy
+df_thresh_all_plot <- df_thresh_all %>%
+  filter(!is.na(Threshold)) %>%
+  mutate(
+    pct_change = round((Threshold - Base_Value) / abs(Base_Value) * 100, 1),
+    label_text = paste0("Base: ", signif(Base_Value, 3),
+                        "\nThreshold: ", signif(Threshold, 3),
+                        " (", ifelse(pct_change > 0, "+", ""), pct_change, "%)")
+  )
+
+df_thresh_all_plot <- df_thresh_all_plot %>%
+  group_by(Strategy) %>%
+  mutate(param_ordered = reorder(paste0(Strategy, "__", Parameter),
+                                 abs(pct_change))) %>%
+  ungroup()
+
+ggplot(df_thresh_all_plot,
+       aes(x = pct_change,
+           y = param_ordered,
+           fill = pct_change > 0)) +
+  geom_col(alpha = 0.85, width = 0.6) +
+  geom_vline(xintercept = 0, linetype = "dashed",
+             linewidth = 0.7, color = "grey40") +
+  geom_text(aes(label = label_text,
+                hjust = ifelse(pct_change >= 0, -0.05, 1.05)),
+            size = 2.8) +
+
+  facet_wrap(~ Strategy, ncol = 1, scales = "free_y") +
+  scale_y_discrete(labels = function(x) sub("^.*?__", "", x)) +
+  scale_fill_manual(
+    values = c(`TRUE` = "#D55E00", `FALSE` = "#0072B2"),
+    labels = c(`TRUE` = "Must increase to flip",
+               `FALSE` = "Must decrease to flip"),
+    name = "Direction"
+  ) +
+
+  scale_x_continuous(
+    labels = function(x) paste0(x, "%"),
+    expand = expansion(mult = c(0.45, 0.45))
+  ) +
+  labs(
+    title    = "Threshold Sensitivity Analysis \u2014 Non-Dominated Strategies",
+    subtitle = paste0("% change required to flip CE decision at WTP = $150K/QALY"),
+    x = "% change from base value", y = NULL
+  ) +
+  theme_bw(base_size = 13) +
+  theme(legend.position = "bottom", panel.grid.minor = element_blank())
+
+```
+```{r}
+#############################################################
+########## COMBINED CEA FRONTIER: TWO STRATEGIES ############
+#############################################################
+# Cohort: F2/F3 adolescents at age 12 (31.3% F2 / 68.7% F3)
+# Two strategies:
+#   1. Treat at age 12 for 72 weeks
+#   2. Wait until age 18, then treat for 72 weeks
+#############################################################
+
+## Helper: one run given treatment start time
+run_strategy <- function(treat_start, label) {
+  aP_sc <- build_a_P(rr_regress, rr_progress,
+                     p_prog_month_local = p_prog_month,
+                     treat_dur_cycles   = treat_dur_72w_cycles,
+                     treat_start_cycles = treat_start)
+
+  traces_sc <- lapply(treatments, function(stg)
+    run_markov(aP_sc[,,,stg], v_init))
+  names(traces_sc) <- treatments
+
+  list(
+    summary = summarize_strategies(traces_sc, label, m_util_base,
+                                   v_background_cost_month, costs_base,
+                                   drug_cost, treat_dur_cycles_vec = treat_dur_72w_cycles),
+    traces  = traces_sc
+  )
+}
+
+res_imm_full <- run_strategy(treat_start_immediate, "Treat at 12")
+res_del_full <- run_strategy(treat_start_age18,     "Wait until 18")
+res_imm <- res_imm_full$summary
+res_del <- res_del_full$summary
+traces_imm <- res_imm_full$traces
+traces_del <- res_del_full$traces
+
+## LSM is identical in both runs — deduplicate
+res_combined <- bind_rows(res_imm, res_del) %>%
+  mutate(StrategyLabel = case_when(
+    Strategy == "LSM"         ~ "LSM",
+    Scenario == "Treat at 12" ~ "Sema 72w (Age 12)",
+    Scenario == "Wait until 18" ~ "Sema 72w (Age 18)"
+  )) %>%
+  distinct(StrategyLabel, .keep_all = TRUE) %>%
+  arrange(Cost)
+
+icer_res <- calculate_icers(
+  cost       = res_combined$Cost,
+  effect     = res_combined$QALY,
+  strategies = res_combined$StrategyLabel
+)
+
+tbl_frontier <- icer_res %>%
+  transmute(
+    Strategy         = Strategy,
+    `Cost ($)`       = scales::dollar(round(Cost)),
+    `QALYs`          = round(Effect, 3),
+    `Delta Cost ($)` = ifelse(is.na(Inc_Cost),
+                              "\u2014", scales::dollar(round(Inc_Cost))),
+    `Delta QALYs`    = ifelse(is.na(Inc_Effect),
+                              "\u2014", as.character(round(Inc_Effect, 3))),
+    `ICER ($/QALY)`  = case_when(
+      is.na(ICER)    ~ "\u2014",
+      Status == "D"  ~ "Dominated",
+      Status == "ED" ~ "Ext. Dominated",
+      TRUE           ~ scales::dollar(round(ICER))
+    ),
+    Dominance        = case_when(
+      Status == "ND" ~ "Non-dominated",
+      Status == "D"  ~ "Dominated",
+      Status == "ED" ~ "Weakly dominated"
+    )
+  )
+
+cat("\n====================================================\n")
+cat(" CEA FRONTIER — Two Strategies\n")
+cat(" Cohort: F2/F3 adolescents at age 12\n")
+cat(" Treatment duration: 72 weeks (both arms)\n")
+cat("====================================================\n")
+print(tbl_frontier, row.names = FALSE)
+cat("====================================================\n")
+
+ggplot(icer_res, aes(x = Effect, y = Cost)) +
+  geom_line(data = icer_res %>% filter(Status == "ND"),
+            color = "grey35", linetype = "dashed", linewidth = 0.9) +
+  geom_point(aes(color = Strategy), size = 5) +
+  geom_text_repel(aes(label = Strategy), size = 3.5, box.padding = 0.5) +
+  scale_color_manual(values = c("LSM" = "grey40",
+                                "Sema 72w (Age 12)" = "#0072B2",
+                                "Sema 72w (Age 18)" = "#D55E00")) +
+  scale_x_continuous("Discounted QALYs", breaks = pretty_breaks(n = 6)) +
+  scale_y_continuous("Discounted Cost (USD)",
+                     labels = label_dollar(), breaks = pretty_breaks(n = 6)) +
+  labs(title    = "CEA Frontier: Treat at 12 vs. Wait until 18",
+       subtitle = "Cohort: F2/F3 adolescents at age 12; treatment duration = 72 weeks") +
+  theme_bw(base_size = 14) +
+  theme(legend.position = "bottom")
+```
+```{r}
+#############################################################
+########## Define a generate_psa_params() function ##########
+#############################################################
+
+generate_psa_params <- function(n_sim) {
+
+  ## Helpers
+  gamma_params <- function(mean, se) {
+    list(shape = (mean/se)^2, scale = se^2/mean)
+  }
+  beta_params <- function(mean, se) {
+    # clamp se so alpha/beta stay positive
+    se   <- min(se, sqrt(mean * (1 - mean)) * 0.99)
+    alpha <- mean * (mean*(1-mean)/se^2 - 1)
+    beta  <- (1-mean) * (mean*(1-mean)/se^2 - 1)
+    list(shape1 = max(alpha, 0.01), shape2 = max(beta, 0.01))
+  }
+  se_from_range <- function(lo, hi) (hi - lo) / 4
+
+  df <- data.frame(
+
+    ## TREATMENT EFFECTS (log-normal) 
+    rr_sema_regress  = rlnorm(n_sim,
+                              meanlog = log(1.5625),
+                              sdlog   = se_from_range(log(1.5625), log(1.7282))),
+    rr_sema_progress = rlnorm(n_sim,
+                              meanlog = log(0.6097),
+                              sdlog   = (log(0.6097) - log(0.3734)) / 1.96),
+
+    ## FIBROSIS TRANSITION HAZARDS (annual, gamma) 
+    h_F0_F1 = rgamma(n_sim,
+                     gamma_params(0.100, se_from_range(0.077, 0.132))$shape,
+                     scale = gamma_params(0.100, se_from_range(0.077, 0.132))$scale),
+    h_F1_F0 = rgamma(n_sim,
+                     gamma_params(0.025, se_from_range(0.014, 0.046))$shape,
+                     scale = gamma_params(0.025, se_from_range(0.014, 0.046))$scale),
+    h_F1_F2 = rgamma(n_sim,
+                     gamma_params(0.097, se_from_range(0.068, 0.137))$shape,
+                     scale = gamma_params(0.097, se_from_range(0.068, 0.137))$scale),
+    h_F2_F1 = rgamma(n_sim,
+                     gamma_params(0.049, se_from_range(0.023, 0.105))$shape,
+                     scale = gamma_params(0.049, se_from_range(0.023, 0.105))$scale),
+    h_F2_F3 = rgamma(n_sim,
+                     gamma_params(0.075, se_from_range(0.061, 0.092))$shape,
+                     scale = gamma_params(0.075, se_from_range(0.061, 0.092))$scale),
+    h_F3_F2 = rgamma(n_sim,
+                     gamma_params(0.080, se_from_range(0.046, 0.138))$shape,
+                     scale = gamma_params(0.080, se_from_range(0.046, 0.138))$scale),
+    h_F3_F4 = rgamma(n_sim,
+                     gamma_params(0.045, se_from_range(0.033, 0.060))$shape,
+                     scale = gamma_params(0.045, se_from_range(0.033, 0.060))$scale),
+    h_F4_F3 = rgamma(n_sim,
+                     gamma_params(0.047, se_from_range(0.021, 0.108))$shape,
+                     scale = gamma_params(0.047, se_from_range(0.021, 0.108))$scale),
+
+    ## Advanced state hazards (annual) 
+    h_F4_DCC    = rgamma(n_sim,
+                         gamma_params(0.0378, se_from_range(0.03, 0.12))$shape,
+                         scale = gamma_params(0.0378, se_from_range(0.03, 0.12))$scale),
+    h_DCC_Death = rgamma(n_sim,
+                         gamma_params(0.32, se_from_range(0.15, 0.40))$shape,
+                         scale = gamma_params(0.32, se_from_range(0.15, 0.40))$scale),
+    h_HCC_Death = rgamma(n_sim,
+                         gamma_params(0.19, se_from_range(0.10, 0.38))$shape,
+                         scale = gamma_params(0.19, se_from_range(0.10, 0.38))$scale),
+    h_LT_Death  = rgamma(n_sim,
+                         gamma_params(0.067, se_from_range(0.065, 0.10))$shape,
+                         scale = gamma_params(0.067, se_from_range(0.065, 0.10))$scale),
+    h_PostLT_Death = rgamma(n_sim,
+                            gamma_params(0.036, se_from_range(0.03, 0.05))$shape,
+                            scale = gamma_params(0.036, se_from_range(0.03, 0.05))$scale),
+
+    ## STATE COSTS (gamma) 
+    cost_F0_F2 = rgamma(n_sim,
+                    gamma_params(8698, se_from_range(6958, 10436))$shape,
+                    scale = gamma_params(8698, se_from_range(6958, 10436))$scale),
+    
+    ## STATE COSTS (gamma) — drawn then rank-ordered to enforce F3 < F4_CC < HCC < DCC
+    cost_F3_raw    = rgamma(n_sim,
+                       gamma_params(10372,  se_from_range(8297,   12447))$shape,
+                       scale = gamma_params(10372,  se_from_range(8297,   12447))$scale),
+    cost_F4_CC_raw = rgamma(n_sim,
+                       gamma_params(42207,  se_from_range(33766,  50650))$shape,
+                       scale = gamma_params(42207,  se_from_range(33766,  50650))$scale),
+    cost_HCC_raw   = rgamma(n_sim,
+                       gamma_params(141615, se_from_range(113292, 169939))$shape,
+                       scale = gamma_params(141615, se_from_range(113292, 169939))$scale),
+    cost_DCC_raw   = rgamma(n_sim,
+                       gamma_params(195156, se_from_range(156125, 234187))$shape,
+                       scale = gamma_params(195156, se_from_range(156125, 234187))$scale),
+   
+    ## LT complication additional cost (gamma)
+    cost_lt_add = rgamma(n_sim,
+                         gamma_params(lt_add_cost_base,
+                                      se_from_range(lt_add_cost_low,
+                                                    lt_add_cost_high))$shape,
+                         scale = gamma_params(lt_add_cost_base,
+                                              se_from_range(lt_add_cost_low,
+                                                          lt_add_cost_high))$scale),
+
+    ## Drug cost (gamma)
+    cost_sema  = rgamma(n_sim,
+                        gamma_params(6829, se_from_range(2940, 13658))$shape,
+                        scale = gamma_params(6829, se_from_range(2940, 
+                                                                 13658))$scale),
+
+    ## HEALTH STATE UTILITIES (decrement, beta) 
+    # SE is capped inside beta_params() to keep alpha/beta positive
+    qdec_F0_F2  = rbeta(n_sim,
+                        beta_params(0.016, 0.016 * 0.10)$shape1,
+                        beta_params(0.016, 0.016 * 0.10)$shape2),
+    qdec_F3     = rbeta(n_sim,
+                        beta_params(0.145, 0.145 * 0.10)$shape1,
+                        beta_params(0.145, 0.145 * 0.10)$shape2),
+    qdec_F4_CC  = rbeta(n_sim,
+                        beta_params(0.145, 0.145 * 0.10)$shape1,
+                        beta_params(0.145, 0.145 * 0.10)$shape2),
+    qdec_DCC    = rbeta(n_sim,
+                        beta_params(0.155, 0.155 * 0.10)$shape1,
+                        beta_params(0.155, 0.155 * 0.10)$shape2),
+    qdec_HCC    = rbeta(n_sim,
+                        beta_params(0.165, 0.165 * 0.10)$shape1,
+                        beta_params(0.165, 0.165 * 0.10)$shape2),
+    qdec_PostLT = rbeta(n_sim,
+                        beta_params(0.036, 0.036 * 0.10)$shape1,
+                        beta_params(0.036, 0.036 * 0.10)$shape2)
+
+  )
+# Enforce rank order: F3 < F4_CC < HCC < DCC
+  cost_ordered <- t(apply(cbind(df$cost_F3_raw, df$cost_F4_CC_raw,
+                                df$cost_HCC_raw, df$cost_DCC_raw), 1, sort))
+  df$cost_F3    <- cost_ordered[, 1]
+  df$cost_F4_CC <- cost_ordered[, 2]
+  df$cost_HCC   <- cost_ordered[, 3]
+  df$cost_DCC   <- cost_ordered[, 4]
+  df$cost_F3_raw <- df$cost_F4_CC_raw <- df$cost_HCC_raw <- df$cost_DCC_raw <- NULL
+
+  return(df)
+}
+
+```
+```{r}
+#############################################################
+##  run_model_psa_iter_all: PSA iterator for 3 strategies  ##
+##  LSM, Sema 72w (Age 12), Sema 72w (Age 18)              ##
+##  Single cohort: F2/F3 adolescents at age 12             ##
+#############################################################
+
+run_model_psa_iter_all <- function(psa_row) {
+
+  ## ---- Build all PSA-sampled parameters ----
+  rr_reg_psa  <- rr_regress;  rr_reg_psa["Semaglutide"]  <- psa_row$rr_sema_regress
+  rr_prog_psa <- rr_progress; rr_prog_psa["Semaglutide"] <- psa_row$rr_sema_progress
+
+  p_month_psa <- p_prog_month
+  p_month_psa$F0_F1        <- rate_to_prob(psa_row$h_F0_F1,        cycle_length)
+  p_month_psa$F1_F0        <- rate_to_prob(psa_row$h_F1_F0,        cycle_length)
+  p_month_psa$F1_F2        <- rate_to_prob(psa_row$h_F1_F2,        cycle_length)
+  p_month_psa$F2_F1        <- rate_to_prob(psa_row$h_F2_F1,        cycle_length)
+  p_month_psa$F2_F3        <- rate_to_prob(psa_row$h_F2_F3,        cycle_length)
+  p_month_psa$F3_F2        <- rate_to_prob(psa_row$h_F3_F2,        cycle_length)
+  p_month_psa$F3_F4        <- rate_to_prob(psa_row$h_F3_F4,        cycle_length)
+  p_month_psa$F4_F3        <- rate_to_prob(psa_row$h_F4_F3,        cycle_length)
+  p_month_psa$F4_DCC       <- rate_to_prob(psa_row$h_F4_DCC,       cycle_length)
+  p_month_psa$DCC_Death    <- rate_to_prob(psa_row$h_DCC_Death,    cycle_length)
+  p_month_psa$HCC_Death    <- rate_to_prob(psa_row$h_HCC_Death,    cycle_length)
+  p_month_psa$LT_Death     <- rate_to_prob(psa_row$h_LT_Death,     cycle_length)
+  p_month_psa$PostLT_Death <- rate_to_prob(psa_row$h_PostLT_Death, cycle_length)
+
+  cost_vec_psa          <- costs_base
+  cost_vec_psa["F0"]    <- psa_row$cost_F0_F2
+  cost_vec_psa["F1"]    <- psa_row$cost_F0_F2
+  cost_vec_psa["F2"]    <- psa_row$cost_F0_F2
+  cost_vec_psa["F3"]    <- psa_row$cost_F3
+  cost_vec_psa["F4_CC"] <- psa_row$cost_F4_CC
+  cost_vec_psa["DCC"]   <- psa_row$cost_DCC
+  cost_vec_psa["HCC"]   <- psa_row$cost_HCC
+  for (st in c("LT_Y1", "LT_Y1_P"))
+    cost_vec_psa[st] <- 452682 + psa_row$cost_lt_add
+
+  drug_psa                <- drug_cost
+  drug_psa["Semaglutide"] <- psa_row$cost_sema
+
+  qdec_psa             <- qaly_dec_base
+  qdec_psa["F0"]       <- psa_row$qdec_F0_F2
+  qdec_psa["F1"]       <- psa_row$qdec_F0_F2
+  qdec_psa["F2"]       <- psa_row$qdec_F0_F2
+  qdec_psa["F3"]       <- psa_row$qdec_F3
+  qdec_psa["F4_CC"]    <- psa_row$qdec_F4_CC
+  qdec_psa["DCC"]      <- psa_row$qdec_DCC
+  qdec_psa["HCC"]      <- psa_row$qdec_HCC
+  qdec_psa["LT_Y1"]    <- psa_row$qdec_F4_CC
+  qdec_psa["LT_Y1_P"]  <- psa_row$qdec_F4_CC
+  qdec_psa["Post_LT"]  <- psa_row$qdec_PostLT
+
+  util_mat_psa <- build_util_matrix(v_util_age_base, qdec_psa)
+
+  ## ---- Strategy 1: LSM (no treatment, natural history) ----
+  aP_lsm <- build_a_P(rr_reg_psa, rr_prog_psa,
+                      p_prog_month_local = p_month_psa,
+                      treat_dur_cycles   = c(LSM = 0L, Semaglutide = 0L),
+                      treat_start_cycles = treat_start_immediate)
+
+  traces_lsm <- lapply(treatments, function(stg)
+    run_markov(aP_lsm[,,,stg], v_init))
+  names(traces_lsm) <- treatments
+
+  res_lsm <- summarize_strategies(
+    traces_lsm, "LSM",
+    util_mat_psa, v_background_cost_month,
+    cost_vec_psa, drug_psa,
+    treat_dur_cycles_vec = c(LSM = 0L, Semaglutide = 0L)
+  )
+
+  ## ---- Strategy 2: Treat at 12 (72 weeks starting immediately) ----
+  aP_12 <- build_a_P(rr_reg_psa, rr_prog_psa,
+                     p_prog_month_local = p_month_psa,
+                     treat_dur_cycles   = treat_dur_72w_cycles,
+                     treat_start_cycles = treat_start_immediate)
+
+  traces_12 <- lapply(treatments, function(stg)
+    run_markov(aP_12[,,,stg], v_init))
+  names(traces_12) <- treatments
+
+  res_12 <- summarize_strategies(
+    traces_12, "Age12",
+    util_mat_psa, v_background_cost_month,
+    cost_vec_psa, drug_psa,
+    treat_dur_cycles_vec = treat_dur_72w_cycles
+  )
+
+  ## ---- Strategy 3: Wait until 18 (natural history age 12-18, then 72 weeks) ----
+  aP_18 <- build_a_P(rr_reg_psa, rr_prog_psa,
+                     p_prog_month_local = p_month_psa,
+                     treat_dur_cycles   = treat_dur_72w_cycles,
+                     treat_start_cycles = treat_start_age18)
+
+  traces_18 <- lapply(treatments, function(stg)
+    run_markov(aP_18[,,,stg], v_init))
+  names(traces_18) <- treatments
+
+  res_18 <- summarize_strategies(
+    traces_18, "Age18",
+    util_mat_psa, v_background_cost_month,
+    cost_vec_psa, drug_psa,
+    treat_dur_cycles_vec = treat_dur_72w_cycles
+  )
+
+  ## ---- Return named list with 3 strategies ----
+  list(
+    "LSM"               = c(Cost = res_lsm$Cost[res_lsm$Strategy == "LSM"],
+                            QALY = res_lsm$QALY[res_lsm$Strategy == "LSM"]),
+    "Sema 72w (Age 12)" = c(Cost = res_12$Cost[res_12$Strategy == "Semaglutide"],
+                            QALY = res_12$QALY[res_12$Strategy == "Semaglutide"]),
+    "Sema 72w (Age 18)" = c(Cost = res_18$Cost[res_18$Strategy == "Semaglutide"],
+                            QALY = res_18$QALY[res_18$Strategy == "Semaglutide"])
+  )
+}
+```
+
+```{r}
+#############################################################
+##  Multi-Scenario PSA Loop: All Ages × All Durations     ##
+##  NOTE: Each sim runs 8 model calls (2 ages × 4 durations)
+##  n_sim_all is set to 1000                               ##
+##  n_sim = 1000 from PSA above for VOI                   ##
+#############################################################
+
+n_sim_all <- 1000
+
+if (!file.exists("psa_results_all.rds")) {
+  df_psa_input_all <- generate_psa_params(n_sim_all)
+  df_c_all <- as.data.frame(matrix(0, nrow = n_sim_all,
+                                   ncol = length(all_strat_labels)))
+  df_e_all <- as.data.frame(matrix(0, nrow = n_sim_all,
+                                   ncol = length(all_strat_labels)))
+  colnames(df_c_all) <- colnames(df_e_all) <- all_strat_labels
+
+  t_start_all <- Sys.time()
+  for (i in 1:n_sim_all) {
+    res_i <- run_model_psa_iter_all(df_psa_input_all[i, ])
+    for (lbl in all_strat_labels) {
+      df_c_all[i, lbl] <- res_i[[lbl]]["Cost"]
+      df_e_all[i, lbl] <- res_i[[lbl]]["QALY"]
+    }
+    if (i %% 50 == 0) cat(i, "/", n_sim_all, "\n")
+  }
+  cat("Multi-scenario PSA runtime:",
+      round(difftime(Sys.time(), t_start_all, units = "mins"), 1), "min\n")
+
+  saveRDS(list(df_c_all = df_c_all, df_e_all = df_e_all,
+               df_psa_input_all = df_psa_input_all),
+          "psa_results_all.rds")
+
+} else {
+  all_psa          <- readRDS("psa_results_all.rds")
+  df_c_all         <- all_psa$df_c_all
+  df_e_all         <- all_psa$df_e_all
+  df_psa_input_all <- all_psa$df_psa_input_all
+  cat("Loaded all-strategy PSA results from cache.\n")
+}
+
+test_res <- run_model_psa_iter_all(df_psa_input_all[1, ])
+cat("Labels returned by function:\n")
+print(names(test_res))
+cat("\nLabels expected (all_strat_labels):\n")
+print(all_strat_labels)
+cat("\nMismatches:\n")
+print(setdiff(all_strat_labels, names(test_res)))
+```
+```{r}
+#############################################################
+##########  PSA Parameter Distributions Plot  ###############
+#############################################################
+
+txtsize <- 13
+v_wtp <- seq(0, 600000, by = 10000)
+
+# Rename columns for readable facet labels
+param_display_names <- c(
+  rr_sema_regress  = "Sema RR: Regression",
+  rr_sema_progress = "Sema RR: Progression",
+  h_F0_F1          = "Hazard F0\u2192F1",
+  h_F1_F0          = "Hazard F1\u2192F0",
+  h_F1_F2          = "Hazard F1\u2192F2",
+  h_F2_F1          = "Hazard F2\u2192F1",
+  h_F2_F3          = "Hazard F2\u2192F3",
+  h_F3_F2          = "Hazard F3\u2192F2",
+  h_F3_F4          = "Hazard F3\u2192F4",
+  h_F4_F3          = "Hazard F4\u2192F3",
+  h_F4_DCC         = "Hazard F4\u2192DCC",
+  h_DCC_Death      = "DCC\u2192Death",
+  h_HCC_Death      = "HCC\u2192Death",
+  h_LT_Death       = "LT\u2192Death (yr 1)",
+  h_PostLT_Death   = "Post-LT\u2192Death",
+  cost_F0_F2       = "Cost: F0\u2013F2",
+  cost_F3          = "Cost: F3",
+  cost_F4_CC       = "Cost: F4/CC",
+  cost_DCC         = "Cost: DCC",
+  cost_HCC         = "Cost: HCC",
+  cost_sema        = "Cost: Semaglutide",
+  qdec_F0_F2       = "Util dec: F0\u2013F2",
+  qdec_F3          = "Util dec: F3",
+  qdec_F4_CC       = "Util dec: F4/CC",
+  qdec_DCC         = "Util dec: DCC",
+  qdec_HCC         = "Util dec: HCC",
+  qdec_PostLT      = "Util dec: Post-LT"
+)
+
+df_param_dist_long <- df_psa_input_all[, names(param_display_names)] %>%
+  reshape2::melt(variable.name = "Parameter", value.name = "Value") %>%
+  mutate(Parameter = factor(
+    param_display_names[as.character(Parameter)],
+    levels = unname(param_display_names)
+  ))
+
+ggplot(df_param_dist_long, aes(x = Value)) +
+  geom_histogram(aes(y = after_stat(density)), 
+                 col = "black", fill = "gray80", bins = 60) +
+  geom_density(color = "#E69F00", linewidth = 1) +
+  facet_wrap(~ Parameter, scales = "free", ncol = 3) +
+  labs(
+    x     = "Parameter Value",
+    y     = "",
+    title = "PSA: Parameter Distributions — All Sampled Parameters"
+  ) +
+  scale_y_continuous("", breaks = NULL) +
+  theme_bw(base_size = txtsize)
+```
+```{r}
+#############################################################
+#########  PSA Cloud and Table: Strategies ##############
+#############################################################
+
+## ---- PSA object with strategies --------------------------------------
+l_psa_all <- make_psa_obj(
+  cost          = df_c_all,
+  effectiveness = df_e_all,
+  parameters    = df_psa_input_all,
+  strategies    = all_strat_labels
+)
+
+## ---- Compute PSA means and run calculate_icers -----------------------------
+psa_means_all <- summary(l_psa_all)
+
+# CEAC and ELC using strategies
+ceac_obj <- ceac(wtp = v_wtp, psa = l_psa_all)
+elc_obj  <- calc_exp_loss(wtp = v_wtp, psa = l_psa_all)
+
+icer_psa_all <- calculate_icers(
+  cost       = psa_means_all$meanCost,
+  effect     = psa_means_all$meanEffect,
+  strategies = psa_means_all$Strategy
+)
+
+## ---- Updated CEA table ---------------------------------------------
+tbl_psa_frontier <- icer_psa_all %>%
+  transmute(
+    Strategy         = Strategy,
+    `Cost ($)`       = scales::dollar(round(Cost)),
+    `QALYs`          = round(Effect, 3),
+    `Delta Cost ($)` = ifelse(is.na(Inc_Cost),
+                              "\u2014", scales::dollar(round(Inc_Cost))),
+    `Delta QALYs`    = ifelse(is.na(Inc_Effect),
+                              "\u2014", as.character(round(Inc_Effect, 3))),
+    `ICER ($/QALY)`  = dplyr::case_when(
+      is.na(ICER)    ~ "\u2014",
+      Status == "D"  ~ "Dominated",
+      Status == "ED" ~ "Ext. Dominated",
+      TRUE           ~ scales::dollar(round(ICER))
+    ),
+    Dominance        = dplyr::case_when(
+      Status == "ND" ~ "Non-dominated",
+      Status == "D"  ~ "Dominated",
+      Status == "ED" ~ "Weakly dominated"
+    )
+  )
+
+## ---- CE Scatter (PSA cloud for strategies) --------------------------
+plot(l_psa_all) +
+  labs(
+    title    = "PSA: Cost-Effectiveness Scatter — All Strategies",
+    subtitle = paste0("Each point = 1 PSA simulation  |  n = ", n_sim_all)
+  ) +
+  scale_y_continuous("Discounted Cost (USD)", labels = label_dollar(scale = 1)) +
+  xlab("Discounted QALYs")
+```
+```{r}
+#############################################################
+####### All-Strategy CEAC & Expected Loss — Post-PSA ########
+#############################################################
+
+okabe_ito_9 <- c(
+  "#E69F00", "#56B4E9", "#009E73", "#F0E442",
+  "#0072B2", "#D55E00", "#CC79A7", "#999999", "#000000"
+)
+names(okabe_ito_9) <- all_strat_labels
+
+# ── 1. Build PSA object ─────────────────────────────────────
+l_psa_all <- make_psa_obj(
+  cost          = df_c_all[, all_strat_labels],
+  effectiveness = df_e_all[, all_strat_labels],
+  parameters    = df_psa_input_all,
+  strategies    = all_strat_labels
+)
+ 
+v_wtp_all <- seq(0, 600000, by = 10000)
+
+# ── 2. Post-PSA Cost-Effectiveness Plane (mean estimates) ───
+df_psa_all_means <- data.frame(
+  Strategy = all_strat_labels,
+  Cost     = sapply(all_strat_labels, function(s) mean(df_c_all[[s]])),
+  QALY     = sapply(all_strat_labels, function(s) mean(df_e_all[[s]]))
+) %>%
+  arrange(QALY)
+
+# Define df_frontier_all FIRST so mutate() can reference it
+df_frontier_all <- calculate_icers(
+  cost       = df_psa_all_means$Cost,
+  effect     = df_psa_all_means$QALY,
+  strategies = df_psa_all_means$Strategy
+)
+
+df_psa_all_means <- df_psa_all_means %>%
+  mutate(
+    age_grp = dplyr::case_when(
+      Strategy == "LSM"                   ~ "LSM",
+      grepl("Start Age 12", Strategy)     ~ "Treat Age 12",
+      grepl("Start Age 18", Strategy)     ~ "Treat Age 18"
+    ),
+    dom_status = dplyr::case_when(
+      Strategy %in% filter(df_frontier_all, Status == "D")$Strategy  ~ "Dominated",
+      Strategy %in% filter(df_frontier_all, Status == "ED")$Strategy ~ "Weakly dominated",
+      TRUE ~ "Non-dominated"
+    )
+  )
+
+frontier_nd <- df_frontier_all %>% filter(Status == "ND") %>% arrange(Effect)
+
+ggplot(df_psa_all_means, aes(x = QALY, y = Cost,
+                              shape = dom_status, color = age_grp)) +
+  geom_line(data        = frontier_nd,
+            mapping     = aes(x = Effect, y = Cost),
+            inherit.aes = FALSE,
+            color = "grey35", linetype = "dashed", linewidth = 0.9) +
+  geom_point(size = 4, stroke = 1.2) +
+  geom_text_repel(aes(label = Strategy),
+                  size = 3.1, max.overlaps = 25, box.padding = 0.45,
+                  segment.color = NA) +
+  scale_shape_manual(
+    name   = "Dominance status",
+    values = c("Non-dominated"    = 16,
+               "Weakly dominated" = 1,
+               "Dominated"        = 17)
+  ) +
+  scale_color_manual(
+    name   = "Strategy",
+    values = c("LSM"          = "grey40",
+               "Treat Age 12" = "#0072B2",
+               "Treat Age 18" = "#D55E00")
+  ) +
+  scale_x_continuous("Mean PSA QALYs",       breaks = pretty_breaks(n = 6)) +
+  scale_y_continuous("Mean PSA Cost (USD)",
+                     labels = label_dollar(scale = 1),
+                     breaks = pretty_breaks(n = 6)) +
+  labs(
+    title    = "Post-PSA Combined CEA Frontier: All Strategies",
+    subtitle = paste0(
+      "Points = PSA mean costs & QALYs (n = ", n_sim_all, " simulations)\n",
+      "\u25cf Non-dominated  \u25cb Weakly dominated  \u25b2 Dominated"
+    )
+  ) +
+  theme_bw(base_size = 14) +
+  theme(legend.position = "bottom", legend.box = "vertical",
+        panel.grid.major = element_line(color = "grey90"),
+        panel.grid.minor = element_blank())
+
+# Print full ICER table
+print(df_frontier_all)
+
+# ── 3. CEAC — All Strategies ──────────────────────────────────
+ceac_all <- ceac(wtp = v_wtp_all, psa = l_psa_all)
+
+plot(ceac_all) +
+  scale_color_manual(values = unname(okabe_ito_9)) +
+  labs(
+    title    = "Cost-Effectiveness Acceptability Curve — All Strategies",
+    subtitle = "Probability each strategy is cost-effective at each WTP threshold",
+    x        = "Willingness-to-Pay Threshold ($/QALY)",
+    y        = "Probability Cost-Effective"
+  ) +
+  theme_bw(base_size = 14) +
+  theme(legend.position  = "right",
+        legend.text      = element_text(size = 8),
+        legend.key.width = unit(1.5, "cm"))
+
+# ── 4. Expected Loss Curve — All Strategies ───────────────────
+elc_all <- calc_exp_loss(wtp = v_wtp_all, psa = l_psa_all)
+
+plot(elc_all) +
+  scale_color_manual(values = unname(okabe_ito_9)) +
+  labs(
+    title    = "Expected Loss Curve — All Strategies",
+    subtitle = "Expected opportunity loss (foregone net benefit) at each WTP threshold",
+    x        = "Willingness-to-Pay Threshold ($/QALY)",
+    y        = "Expected Loss ($)"
+  ) +
+  theme_bw(base_size = 14) +
+  theme(legend.position  = "right",
+        legend.text      = element_text(size = 8),
+        legend.key.width = unit(1.5, "cm"))
+```
+```{r}
+# ============================================================
+# Value of Information (VOI) Analysis — Strategies
+# ============================================================
+
+# ---- 0. Setup ----------------------------------------------
+source("~/Downloads/GA_functions.R")
+wtp        <- 150000
+txtsize    <- 14
+
+# Use all-strategy PSA outputs
+df_c_voi   <- df_c_all
+df_e_voi   <- df_e_all
+strategies <- all_strat_labels
+n_sim      <- nrow(df_c_voi)
+n_strat    <- length(strategies)
+
+# ---- 1. Net Monetary Benefit (NMB) -------------------------
+df_nmb <- as.data.frame(
+  sapply(strategies, function(s) wtp * df_e_voi[[s]] - df_c_voi[[s]])
+)
+colnames(df_nmb) <- strategies
+
+cat("===== NMB Summary (WTP = $150,000/QALY) =====\n")
+print(colMeans(df_nmb))
+
+## -- Plot NMB distributions --
+df_nmb_long <- reshape2::melt(df_nmb,
+                              variable.name = "Strategy",
+                              value.name    = "NMB")
+ggplot(df_nmb_long, aes(x = NMB / 1000)) +
+  geom_histogram(aes(y = after_stat(density)), col = "black", fill = "gray80", bins = 60) +
+  geom_density(color = "#E69F00", linewidth = 1) +
+  facet_wrap(~ Strategy, scales = "free_y", ncol = 3) +
+  labs(x = "Net Monetary Benefit (thousands $)",
+       title = "PSA: NMB Distributions — All Strategies") +
+  scale_x_continuous(n.breaks = 5) +
+  scale_y_continuous("", breaks = NULL) +
+  theme_bw(base_size = txtsize)
+
+## -- Incremental NMB vs LSM --
+lsm_col <- df_nmb[["LSM"]]
+df_inmb <- as.data.frame(
+  sapply(strategies[strategies != "LSM"], function(s) df_nmb[[s]] - lsm_col)
+)
+df_inmb_long <- reshape2::melt(df_inmb,
+                               variable.name = "Comparison",
+                               value.name    = "INMB")
+ggplot(df_inmb_long, aes(x = INMB / 1000)) +
+  geom_histogram(aes(y = after_stat(density)), col = "black", fill = "gray80", bins = 60) +
+  geom_density(color = "#E69F00", linewidth = 1) +
+  geom_vline(xintercept = 0, col = "#0072B2", linewidth = 1.2, linetype = "dashed") +
+  facet_wrap(~ Comparison, scales = "free_y", ncol = 4) +
+  labs(x = "Incremental NMB vs LSM (thousands $)",
+       title = "PSA: Incremental NMB — All Strategies vs LSM") +
+  scale_y_continuous("", breaks = NULL) +
+  theme_bw(base_size = txtsize)
+
+# ---- 2. Loss Matrix ----------------------------------------
+d_star <- which.max(colMeans(df_nmb))
+cat("\nOptimal strategy (highest mean NMB):", strategies[d_star], "\n")
+
+# Loss = NMB of optimal - NMB of each strategy (per simulation)
+m_loss <- as.matrix(df_nmb - df_nmb[, d_star])
+colnames(m_loss) <- strategies
+
+# ---- 3. EVPI -----------------------------------------------
+v_max_loss_i <- rowMaxs(m_loss)
+evpi         <- mean(v_max_loss_i)
+cat("\n===== EVPI =====\n")
+cat("EVPI (per patient): $", format(round(evpi), big.mark = ","), "\n")
+
+## EVPI vs WTP
+v_wtp  <- seq(0, 600000, by = 10000)
+v_evpi <- numeric(length(v_wtp))
+for (k in seq_along(v_wtp)) {
+  nmb_k   <- as.data.frame(
+    sapply(strategies, function(s) v_wtp[k] * df_e_voi[[s]] - df_c_voi[[s]])
+  )
+  d_k       <- which.max(colMeans(nmb_k))
+  loss_k    <- as.matrix(nmb_k - nmb_k[, d_k])
+  v_evpi[k] <- mean(rowMaxs(loss_k))
+}
+
+df_evpi_wtp <- data.frame(WTP = v_wtp, EVPI = v_evpi)
+ggplot(df_evpi_wtp, aes(x = WTP / 1000, y = EVPI / 1000)) +
+  geom_line(linewidth = 1, color = "#0072B2") +
+  geom_vline(xintercept = wtp / 1000, linetype = "dashed", color = "gray40") +
+  annotate("text", x = wtp / 1000 + 8, y = max(v_evpi) * 0.9 / 1000,
+           label = paste0("WTP = $", wtp / 1000, "K"), hjust = 0, size = 4) +
+  labs(x = "Willingness-to-Pay (thousands $/QALY)",
+       y = "EVPI (thousands $)",
+       title = "EVPI Across WTP Thresholds — Strategies") +
+  scale_x_continuous(labels = comma) +
+  scale_y_continuous(labels = comma) +
+  theme_bw(base_size = txtsize)
+
+# ---- 4. EVPPI (individual parameters) ----------------------
+v_names_params <- c(
+  "rr_sema_regress", "rr_sema_progress",
+  "h_F0_F1", "h_F1_F2", "h_F2_F3", "h_F3_F4", "h_F4_DCC",
+  "h_F1_F0", "h_F2_F1", "h_F3_F2", "h_F4_F3",
+  "h_DCC_Death", "h_HCC_Death", "h_LT_Death", "h_PostLT_Death",
+  "cost_F0_F2", "cost_F3", "cost_F4_CC", "cost_DCC", "cost_HCC",
+  "cost_sema",
+  "qdec_F0_F2", "qdec_F3", "qdec_F4_CC", "qdec_DCC", "qdec_HCC", "qdec_PostLT"
+)
+
+param_labels_voi <- c(
+  rr_sema_regress  = "Sema RR: Regression",
+  rr_sema_progress = "Sema RR: Progression",
+  h_F0_F1 = "Hazard F0\u2192F1", h_F1_F2 = "Hazard F1\u2192F2",
+  h_F2_F3 = "Hazard F2\u2192F3", h_F3_F4 = "Hazard F3\u2192F4",
+  h_F4_DCC = "Hazard F4\u2192DCC",
+  h_F1_F0 = "Hazard F1\u2192F0 (reg)", h_F2_F1 = "Hazard F2\u2192F1 (reg)",
+  h_F3_F2 = "Hazard F3\u2192F2 (reg)", h_F4_F3 = "Hazard F4\u2192F3 (reg)",
+  h_DCC_Death = "DCC\u2192Death", h_HCC_Death = "HCC\u2192Death",
+  h_LT_Death = "LT\u2192Death (yr 1)", h_PostLT_Death = "Post-LT\u2192Death",
+  cost_F0_F2 = "Cost: F0\u2013F2", cost_F3 = "Cost: F3",
+  cost_F4_CC = "Cost: F4/CC", cost_DCC = "Cost: DCC", cost_HCC = "Cost: HCC",
+  cost_sema = "Cost: Semaglutide",
+  qdec_F0_F2 = "Util dec: F0\u2013F2", qdec_F3 = "Util dec: F3",
+  qdec_F4_CC = "Util dec: F4/CC", qdec_DCC = "Util dec: DCC",
+  qdec_HCC = "Util dec: HCC", qdec_PostLT = "Util dec: Post-LT"
+)
+
+# Use df_psa_input_all since this VOI is based on the all-strategy PSA
+df_params <- df_psa_input_all[, v_names_params]
+n_params  <- ncol(df_params)
+
+cat("\n===== Computing EVPPI for individual parameters =====\n")
+
+v_evppi  <- numeric(n_params)
+lmm_list <- vector("list", n_params)   # one list of n_strat GAMs per parameter
+
+for (p in seq_len(n_params)) {
+  cat("  EVPPI:", v_names_params[p], "\n")
+  # Fit one GAM per strategy
+  gams_p <- lapply(seq_len(n_strat), function(j)
+    gam(m_loss[, j] ~ s(df_params[, p]))
+  )
+  lmm_list[[p]] <- gams_p
+  m_Lhat        <- do.call(cbind, lapply(gams_p, `[[`, "fitted.values"))
+  v_evppi[p]    <- mean(rowMaxs(m_Lhat))
+}
+
+df_evppi <- data.frame(
+  Parameter = factor(
+    unname(param_labels_voi[v_names_params]),
+    levels = unname(param_labels_voi[v_names_params])[order(v_evppi, decreasing = TRUE)]
+  ),
+  EVPPI = v_evppi
+)
+
+cat("\n===== EVPPI Results =====\n")
+print(df_evppi[order(df_evppi$EVPPI, decreasing = TRUE), ])
+
+ggplot(df_evppi, aes(x = Parameter, y = EVPPI)) +
+  geom_bar(stat = "identity", fill = "#0072B2") +
+  geom_hline(yintercept = evpi, linetype = "dashed", color = "red", linewidth = 0.9) +
+  annotate("text", x = n_params - 1, y = evpi * 1.05,
+           label = "EVPI", color = "red", size = 4) +
+  coord_flip() +
+  labs(x = "", y = "EVPPI ($ per patient)",
+       title = "EVPPI — Strategies",
+       subtitle = paste0("WTP = $", format(wtp, big.mark = ","),
+                         "/QALY | EVPI = $", format(round(evpi), big.mark = ","))) +
+  scale_y_continuous(labels = comma, n.breaks = 6) +
+  theme_bw(base_size = txtsize)
+
+# ---- 5. EVPPI for Grouped Parameters -----------------------
+param_groups <- list(
+  "Sema Treatment Effects" = c("rr_sema_regress", "rr_sema_progress"),
+  "Fibrosis Progression"   = c("h_F0_F1","h_F1_F2","h_F2_F3","h_F3_F4","h_F4_DCC"),
+  "Fibrosis Regression"    = c("h_F1_F0","h_F2_F1","h_F3_F2","h_F4_F3"),
+  "Mortality Hazards"      = c("h_DCC_Death","h_HCC_Death","h_LT_Death","h_PostLT_Death"),
+  "State Costs"            = c("cost_F0_F2","cost_F3","cost_F4_CC","cost_DCC","cost_HCC"),
+  "Drug Cost (Sema)"       = "cost_sema",
+  "Health State Utilities" = c("qdec_F0_F2","qdec_F3","qdec_F4_CC",
+                                "qdec_DCC","qdec_HCC","qdec_PostLT")
+)
+
+cat("\n===== Computing EVPPI for parameter groups =====\n")
+v_evppi_groups <- numeric(length(param_groups))
+names(v_evppi_groups) <- names(param_groups)
+
+for (g in seq_along(param_groups)) {
+  grp_name   <- names(param_groups)[g]
+  grp_params <- param_groups[[g]]
+  grp_idx    <- which(v_names_params %in% grp_params)
+  cat("  Group:", grp_name, "(", length(grp_params), "params)\n")
+
+  smooth_terms  <- paste0("s(df_params[,", grp_idx, "])", collapse = " + ")
+  if (length(grp_idx) > 1) {
+    interact_term <- paste0("ti(df_params[,", grp_idx[1], "], df_params[,",
+                            grp_idx[2], "])")
+    f_str <- paste("~", smooth_terms, "+", interact_term)
+  } else {
+    f_str <- paste("~", smooth_terms)
+  }
+
+  gams_g <- lapply(seq_len(n_strat), function(j)
+    gam(as.formula(paste("m_loss[,", j, "]", f_str)))
+  )
+  m_Lhat_grp      <- do.call(cbind, lapply(gams_g, `[[`, "fitted.values"))
+  v_evppi_groups[g] <- mean(rowMaxs(m_Lhat_grp))
+}
+
+df_evppi_groups <- data.frame(
+  Group = factor(names(v_evppi_groups),
+                 levels = names(v_evppi_groups)[order(v_evppi_groups, decreasing = TRUE)]),
+  EVPPI = v_evppi_groups
+)
+
+cat("\n===== EVPPI by Parameter Group =====\n")
+print(df_evppi_groups[order(df_evppi_groups$EVPPI, decreasing = TRUE), ])
+
+ggplot(df_evppi_groups, aes(x = Group, y = EVPPI)) +
+  geom_bar(stat = "identity", fill = "#009E73") +
+  geom_hline(yintercept = evpi, linetype = "dashed", color = "red", linewidth = 0.9) +
+  annotate("text", x = 1, y = evpi * 1.05, label = "EVPI", color = "red", size = 4) +
+  coord_flip() +
+  labs(x = "", y = "EVPPI ($ per patient)",
+       title = "EVPPI by Parameter Group — Strategies",
+       subtitle = paste0("WTP = $", format(wtp, big.mark = ","), "/QALY")) +
+  scale_y_continuous(labels = comma, n.breaks = 6) +
+  theme_bw(base_size = txtsize)
+
+# ---- 6. EVSI -----------------------------------------------
+n0_defaults <- c(
+  rr_sema_regress = 400, rr_sema_progress = 400,
+  h_F0_F1 = 2000, h_F1_F2 = 2000, h_F2_F3 = 2000,
+  h_F3_F4 = 2000, h_F4_DCC = 1500,
+  h_F1_F0 = 2000, h_F2_F1 = 2000, h_F3_F2 = 2000, h_F4_F3 = 1500,
+  h_DCC_Death = 800, h_HCC_Death = 800,
+  h_LT_Death = 500, h_PostLT_Death = 500,
+  cost_F0_F2 = 300, cost_F3 = 300, cost_F4_CC = 300,
+  cost_DCC = 300, cost_HCC = 300, cost_sema = 100,
+  qdec_F0_F2 = 500, qdec_F3 = 500, qdec_F4_CC = 500,
+  qdec_DCC = 300, qdec_HCC = 300, qdec_PostLT = 200
+)
+
+v_n <- c(0, 10, 25, 50, 100, 200, 300, 500, 750, 1000, 1500, 2000, 3000, 5000)
+n_samples <- length(v_n)
+
+cat("\n===== Computing EVSI for individual parameters =====\n")
+
+df_evsi <- data.frame(N = v_n,
+                      matrix(0, nrow = n_samples, ncol = n_params))
+colnames(df_evsi)[-1] <- v_names_params
+
+for (p in seq_len(n_params)) {
+  cat("  EVSI:", v_names_params[p], "\n")
+  gams_p <- lmm_list[[p]]   # reuse GAMs fitted in EVPPI step
+  for (s in seq_len(n_samples)) {
+    Ltilde_list <- lapply(gams_p, function(gm)
+      predict.ga(gm, n = v_n[s], n0 = n0_defaults[v_names_params[p]], verbose = FALSE)
+    )
+    m_Ltilde          <- do.call(cbind, Ltilde_list)
+    df_evsi[s, p + 1] <- mean(rowMaxs(m_Ltilde))
+  }
+}
+
+# Reshape + label
+df_evsi_long <- reshape2::melt(df_evsi, id.vars = "N",
+                               variable.name = "Parameter", value.name = "EVSI")
+df_evsi_long$Label <- param_labels_voi[as.character(df_evsi_long$Parameter)]
+
+df_evppi_ref <- data.frame(
+  Parameter = v_names_params,
+  Label     = unname(param_labels_voi[v_names_params]),
+  EVPPI     = v_evppi
+)
+
+## Top 8 by EVPPI
+top8         <- df_evppi_ref$Parameter[order(df_evppi_ref$EVPPI, decreasing = TRUE)][1:8]
+df_evsi_top  <- df_evsi_long[df_evsi_long$Parameter %in% top8, ]
+df_evppi_top <- df_evppi_ref[df_evppi_ref$Parameter %in% top8, ]
+
+lvls <- df_evppi_ref$Label[order(df_evppi_ref$EVPPI, decreasing = TRUE)]
+df_evsi_top$Label  <- factor(df_evsi_top$Label,  levels = lvls)
+df_evppi_top$Label <- factor(df_evppi_top$Label, levels = lvls)
+
+ggplot(df_evsi_top, aes(x = N, y = EVSI)) +
+  geom_line(aes(linetype = "EVSI"), linewidth = 0.9) +
+  geom_point(size = 1.5) +
+  geom_hline(aes(yintercept = EVPPI, linetype = "EVPPI"),
+             data = df_evppi_top, color = "red", linewidth = 0.8) +
+  facet_wrap(~ Label, scales = "free_y", ncol = 4) +
+  scale_linetype_manual(name = "",
+                        values = c("EVSI" = "solid", "EVPPI" = "dashed")) +
+  labs(x = "Future study sample size (n)", y = "EVSI ($ per patient)",
+       title = "EVSI — Top 8 Parameters (Strategies)",
+       subtitle = "Dashed = EVPPI ceiling") +
+  scale_x_continuous(n.breaks = 5) +
+  scale_y_continuous(labels = dollar, n.breaks = 5) +
+  theme_bw(base_size = txtsize) +
+  theme(legend.position = "bottom")
+
+# ---- 7. EVSI Study Designs & ENBS --------------------------
+disc_pop   <- 0.03
+LT_years   <- 10
+v_time_pop <- seq(0, LT_years)
+
+# Define functions BEFORE they are called
+TotPop <- function(time, prev, incid, disc = 0) {
+  pop_time <- c(prev, rep(incid, length(time) - 1))
+  sum(pop_time / (1 + disc)^time)
+}
+CostRes <- function(fixed.cost = 0, samp.size, cost.per.patient,
+                    INMB = 0, clin.trial = TRUE, n.arms = 2) {
+  if (clin.trial) fixed.cost + n.arms * samp.size * cost.per.patient + samp.size * INMB
+  else fixed.cost + samp.size * cost.per.patient
+}
+
+# Population parameters for ENBS (millions)
+mash_prev  <- 0.300
+mash_incid <- 0.040
+
+# Run once per scenario and print all three
+for (pop_scenario in list(
+  c(prev=0.120, inc=0.015, label="Pediatric only"),
+  c(prev=0.660, inc=0.080, label="All MASH"),
+  c(prev=0.300, inc=0.040, label="Conservative mid")
+)) {
+  tot_pop_s <- TotPop(v_time_pop, as.numeric(pop_scenario["prev"]),
+                      as.numeric(pop_scenario["inc"]), disc_pop)
+  cat(pop_scenario["label"], "— Pop EVSI: $", 
+      round(evpi * tot_pop_s, 2), "M\n")
+}
+
+tot_pop <- TotPop(v_time_pop, mash_prev, mash_incid, disc_pop)
+
+cat("\n===== Population EVPI =====\n")
+cat("Total affected population (discounted, millions):", round(tot_pop, 4), "\n")
+cat("Population EVPI ($M):", round(evpi * tot_pop, 2), "\n")
+
+## -- Study A: RCT of Semaglutide --
+v_sel_rct  <- which(v_names_params %in% c("rr_sema_regress","rr_sema_progress"))
+n0_rct     <- n0_defaults[v_names_params[v_sel_rct]]
+v_n_rct <- c(0, 25, 50, 100, 200, 400, 600, 800, 1000, 1500, 2000, 3000, 5000)
+
+cat("\n===== Fitting GAMs for RCT EVSI =====\n")
+gams_rct <- lapply(seq_len(n_strat), function(j)
+  gam(m_loss[, j] ~
+        s(df_params[, v_sel_rct[1]]) +
+        s(df_params[, v_sel_rct[2]]) +
+        ti(df_params[, v_sel_rct[1]], df_params[, v_sel_rct[2]]))
+)
+evppi_rct <- mean(rowMaxs(do.call(cbind, lapply(gams_rct, `[[`, "fitted.values"))))
+
+df_evsi_rct <- data.frame(Study = "RCT (Sema efficacy)", N = v_n_rct, EVSI = 0)
+for (s in seq_along(v_n_rct)) {
+  Ltilde_list <- lapply(gams_rct, function(gm)
+    predict.ga(gm, n = v_n_rct[s], n0 = n0_rct, verbose = FALSE))
+  df_evsi_rct$EVSI[s] <- mean(rowMaxs(do.call(cbind, Ltilde_list)))
+}
+
+## -- Study B: Natural History Cohort --
+v_sel_nh <- which(v_names_params %in%
+                    c("h_F0_F1","h_F1_F2","h_F2_F3","h_F3_F4","h_F4_DCC",
+                      "h_F1_F0","h_F2_F1","h_F3_F2","h_F4_F3"))
+n0_nh    <- n0_defaults[v_names_params[v_sel_nh]]
+v_n_nh  <- c(0, 50, 100, 250, 500, 750, 1000, 1500, 2000, 3000, 5000, 7500, 10000)
+
+cat("===== Fitting GAMs for Natural History Cohort EVSI =====\n")
+smooth_nh   <- paste0("s(df_params[,", v_sel_nh, "])", collapse = " + ")
+interact_nh <- paste0("ti(df_params[,", v_sel_nh[1], "], df_params[,", v_sel_nh[2], "])")
+gams_nh <- lapply(seq_len(n_strat), function(j)
+  gam(as.formula(paste("m_loss[,", j, "] ~", smooth_nh, "+", interact_nh)))
+)
+evppi_nh <- mean(rowMaxs(do.call(cbind, lapply(gams_nh, `[[`, "fitted.values"))))
+
+df_evsi_nh <- data.frame(Study = "Cohort (fibrosis transitions)", N = v_n_nh, EVSI = 0)
+for (s in seq_along(v_n_nh)) {
+  Ltilde_list <- lapply(gams_nh, function(gm)
+    predict.ga(gm, n = v_n_nh[s], n0 = n0_nh, verbose = FALSE))
+  df_evsi_nh$EVSI[s] <- mean(rowMaxs(do.call(cbind, Ltilde_list)))
+}
+
+## -- EVSI plot --
+df_evppi_designs <- data.frame(
+  Study = c("RCT (Sema efficacy)", "Cohort (fibrosis transitions)"),
+  EVPPI = c(evppi_rct, evppi_nh)
+)
+ggplot(bind_rows(df_evsi_rct, df_evsi_nh), aes(x = N, y = EVSI)) +
+  geom_line(aes(linetype = "EVSI"), linewidth = 1) +
+  geom_point() +
+  geom_hline(aes(yintercept = EVPPI, linetype = "EVPPI"),
+             data = df_evppi_designs, color = "red", linewidth = 0.9) +
+  facet_wrap(~ Study, scales = "free_x") +
+  scale_linetype_manual(name = "",
+                        values = c("EVSI" = "solid", "EVPPI" = "dashed")) +
+  labs(x = "Sample size (n)", y = "EVSI ($ per patient)",
+       title = "EVSI by Study Design — Strategies vs. LSM",
+       subtitle = "Dashed = EVPPI ceiling for that parameter group") +
+  scale_x_continuous(labels = comma, n.breaks = 5) +
+  scale_y_continuous(labels = dollar, n.breaks = 6) +
+  theme_bw(base_size = txtsize) +
+  theme(legend.position = c(0.85, 0.2))
+
+## -- ENBS --
+df_evsi_rct$popEVSI <- df_evsi_rct$EVSI * tot_pop
+df_evsi_nh$popEVSI  <- df_evsi_nh$EVSI  * tot_pop
+
+v_cost_rct <- CostRes(fixed.cost = 10e6 * 1e-6, samp.size = v_n_rct,
+                      cost.per.patient = 30e3 * 1e-6, clin.trial = TRUE, n.arms = 2)
+v_cost_nh  <- CostRes(fixed.cost = 500e3 * 1e-6, samp.size = v_n_nh,
+                      cost.per.patient = 5e3 * 1e-6, clin.trial = FALSE)
+
+# Cost breakdown table 
+cat("\n===== Research Cost Breakdown =====\n")
+cat("RCT — Fixed: $10M | Variable: $30K/patient/arm × 2 arms\n")
+cat(sprintf("  At n=100:  $%.1fM\n", 10 + 2*100*0.03))
+cat(sprintf("  At n=500:  $%.1fM\n", 10 + 2*500*0.03))
+cat(sprintf("  At n=1000: $%.1fM\n", 10 + 2*1000*0.03))
+cat(sprintf("  At n=5000: $%.1fM\n", 10 + 2*5000*0.03))
+cat("Cohort — Fixed: $0.5M | Variable: $5K/patient\n")
+cat(sprintf("  At n=1000:  $%.1fM\n",  0.5 + 1000*0.005))
+cat(sprintf("  At n=5000:  $%.1fM\n",  0.5 + 5000*0.005))
+cat(sprintf("  At n=10000: $%.1fM\n",  0.5 + 10000*0.005))
+
+df_enbs_rct <- merge(df_evsi_rct, data.frame(N = v_n_rct, CS = v_cost_rct), by = "N")
+df_enbs_nh  <- merge(df_evsi_nh,  data.frame(N = v_n_nh,  CS = v_cost_nh),  by = "N")
+df_enbs_rct$ENBS <- df_enbs_rct$popEVSI - df_enbs_rct$CS
+df_enbs_nh$ENBS  <- df_enbs_nh$popEVSI  - df_enbs_nh$CS
+
+oss_rct      <- df_enbs_rct$N[which.max(df_enbs_rct$ENBS)]
+oss_nh       <- df_enbs_nh$N[which.max(df_enbs_nh$ENBS)]
+max_enbs_rct <- max(df_enbs_rct$ENBS)
+max_enbs_nh  <- max(df_enbs_nh$ENBS)
+
+cat("\n===== ENBS =====\n")
+cat("RCT  — n* =", oss_rct, "| Max ENBS: $",
+    format(round(max_enbs_rct * 1e6), big.mark = ","), "\n")
+cat("Cohort — n* =", oss_nh,  "| Max ENBS: $",
+    format(round(max_enbs_nh  * 1e6), big.mark = ","), "\n")
+
+df_enbs_rct$nstar <- oss_rct
+df_enbs_nh$nstar  <- oss_nh
+
+enbs_all_long <- bind_rows(
+  reshape2::melt(df_enbs_rct[, c("Study","N","nstar","popEVSI","CS","ENBS")],
+                 id.vars = c("Study","N","nstar"), value.name = "Million"),
+  reshape2::melt(df_enbs_nh[,  c("Study","N","nstar","popEVSI","CS","ENBS")],
+                 id.vars = c("Study","N","nstar"), value.name = "Million")
+) %>% mutate(Study_label = paste0(Study, "\n(n* = ", comma(nstar), ")"))
+
+df_enbs_labels <- enbs_all_long %>%
+  group_by(Study_label, variable) %>%
+  slice_max(N, n = 1) %>%
+  ungroup() %>%
+  mutate(line_label = case_when(
+    variable == "popEVSI" ~ "Pop. EVSI",
+    variable == "CS"      ~ "Research cost",
+    variable == "ENBS"    ~ "ENBS"
+  ))
+
+ggplot(enbs_all_long, aes(x = N, y = Million, colour = variable, group = variable)) +
+  facet_wrap(~ Study_label, scales = "free_x") +
+  geom_hline(yintercept = 0, linetype = "dashed", colour = "gray50") +
+  geom_vline(aes(xintercept = nstar), linetype = "dashed", colour = "gray50") +
+  geom_line(linewidth = 1) +
+  geom_point() +
+  geom_text(
+    data    = df_enbs_labels,
+    aes(label = line_label),
+    hjust   = -0.08,
+    size    = 3.2,
+    fontface = "bold",
+    show.legend = FALSE
+  ) +
+  scale_x_continuous(
+    "Sample size (N)",
+    labels = comma,
+    n.breaks = 5,
+    expand = expansion(mult = c(0.02, 0.18))  
+  ) +
+  scale_y_continuous(
+    "Value (millions USD)\nNote: popEVSI and Research cost both in $M",
+    labels = dollar,
+    n.breaks = 6
+  ) +
+  scale_colour_manual(
+    name   = "",
+    values = c("popEVSI" = "#0072B2", "CS" = "#D55E00", "ENBS" = "#009E73"),
+    labels = c("popEVSI" = "Population EVSI ($M)",
+               "CS"      = "Cost of research ($M)",
+               "ENBS"    = "ENBS ($M)")
+  ) +
+  labs(
+    title    = "Expected Net Benefit of Sampling — Strategies vs LSM",
+    subtitle = "Population: US adolescents with F2/F3 MASH | Disc. rate 3% | All values in millions USD",
+    caption  = "Dashed vertical line = optimal sample size (n*). Research cost = fixed + per-patient variable cost."
+  ) +
+  theme_bw(base_size = txtsize) +
+  theme(legend.position = "bottom", panel.spacing = unit(2, "lines"))
+
+# ---- 8. Summary Table --------------------------------------
+cat("\n=================================================\n")
+cat("  VOI SUMMARY — Strategies vs. LSM\n")
+cat("  WTP = $", format(wtp, big.mark = ","), "/QALY\n")
+cat("=================================================\n")
+cat("Optimal strategy:               ", strategies[d_star], "\n")
+cat("EVPI (per patient):             $", format(round(evpi), big.mark = ","), "\n")
+cat("Population EVPI (discounted):   $",
+    format(round(evpi * tot_pop * 1e6), big.mark = ","), "\n")
+cat("\nTop 5 parameters by EVPPI:\n")
+top5 <- head(df_evppi[order(df_evppi$EVPPI, decreasing = TRUE), ], 5)
+for (i in seq_len(nrow(top5))) {
+  cat("  ", i, ". ", as.character(top5$Parameter[i]),
+      "  EVPPI = $", format(round(top5$EVPPI[i]), big.mark = ","), "\n", sep = "")
+}
+cat("\nENBS Optimal Sample Sizes:\n")
+cat("  RCT (sema efficacy):       n* =", oss_rct, "\n")
+cat("  Natural history cohort:    n* =", oss_nh,  "\n")
+cat("=================================================\n")
+
+```
+
+```{r}
+# ============================================================
+# EXTERNAL VALIDATION
+# ============================================================
+# Three literature-derived targets that do NOT depend on
+# calibrated fibrosis transitions:
+#   1. Annual HCC incidence from F4
+#   2. Annual DCC rate from F4
+#   3. Annual mortality from DCC
+#
+# These check whether the fixed cirrhosis-complication
+# transitions (Kim 2025 / Rustgi 2022) produce clinically
+# plausible annual event rates in forward simulation.
+#
+# Also shown: state occupancy and cumulative mortality under
+# LSM natural history (descriptive, not comparative).
+# ============================================================
+
+library(ggplot2)
+library(dplyr)
+library(tidyr)
+library(scales)
+
+txtsize <- 13
+
+# ---- Literature targets ----
+target_hcc_incidence  <- list(
+  annual_low  = 0.005,
+  annual_high = 0.030,
+  source      = "Kanwal et al. Gastroenterology 2022; Sanyal et al. NEJM 2021"
+)
+
+target_dcc_rate <- list(
+  annual_low  = 0.027,
+  annual_high = 0.066,
+  source      = "Sanyal et al. NEJM 2021; Le et al. CGH 2023"
+)
+
+target_dcc_mortality <- list(
+  annual_low  = 0.10,
+  annual_high = 0.25,
+  source      = "Ng et al. CGH 2023; D'Amico et al. J Hepatol 2014"
+)
+
+# ---- LSM trace for validation ----
+# Use the LSM trace already built by run_strategy() earlier in the file
+# (available as traces_imm[["LSM"]])
+trace_lsm  <- traces_imm[["LSM"]]
+ages_trace <- age_start + (0:n_cycles) * cycle_length
+
+# ---- Target 1: Annual HCC incidence from F4 ----
+f4_window <- 100:200   # adult window where F4 is well-populated
+hcc_monthly <- mean(
+  diff(trace_lsm[f4_window, "HCC"]) /
+    pmax(trace_lsm[f4_window[-length(f4_window)], "F4_CC"], 1e-8)
+)
+hcc_incidence_annual <- rate_to_prob(prob_to_rate(hcc_monthly) * 12)
+
+cat("=== Target 1: Annual HCC incidence from F4 ===\n")
+cat("  Model predicted:  ", round(hcc_incidence_annual * 100, 2), "% /year\n")
+cat("  Literature range: ", target_hcc_incidence$annual_low * 100, "-",
+    target_hcc_incidence$annual_high * 100, "% /year\n")
+cat("  Source:", target_hcc_incidence$source, "\n\n")
+
+# ---- Target 2: Annual DCC rate from F4 ----
+dcc_monthly <- mean(
+  diff(trace_lsm[f4_window, "DCC"]) /
+    pmax(trace_lsm[f4_window[-length(f4_window)], "F4_CC"], 1e-8)
+)
+dcc_rate_annual <- rate_to_prob(prob_to_rate(dcc_monthly) * 12)
+
+cat("=== Target 2: Annual DCC rate from F4 ===\n")
+cat("  Model predicted:  ", round(dcc_rate_annual * 100, 2), "% /year\n")
+cat("  Literature range: ", target_dcc_rate$annual_low * 100, "-",
+    target_dcc_rate$annual_high * 100, "% /year\n")
+cat("  Source:", target_dcc_rate$source, "\n\n")
+
+# ---- Target 3: Annual mortality from DCC ----
+dcc_mort_annual <- rate_to_prob(prob_to_rate(p_prog_month$DCC_Death) * 12)
+
+cat("=== Target 3: Annual mortality from DCC ===\n")
+cat("  Model predicted:  ", round(dcc_mort_annual * 100, 1), "% /year\n")
+cat("  Literature range: ", target_dcc_mortality$annual_low * 100, "-",
+    target_dcc_mortality$annual_high * 100, "% /year\n")
+cat("  Source:", target_dcc_mortality$source, "\n\n")
+
+# ---- Validation summary table ----
+df_val_summary <- data.frame(
+  Target = c(
+    "Annual HCC incidence (F4)",
+    "Annual DCC rate (F4)",
+    "Annual mortality from DCC"
+  ),
+  Literature_Low = c(
+    paste0(target_hcc_incidence$annual_low  * 100, "%"),
+    paste0(target_dcc_rate$annual_low       * 100, "%"),
+    paste0(target_dcc_mortality$annual_low  * 100, "%")
+  ),
+  Literature_High = c(
+    paste0(target_hcc_incidence$annual_high * 100, "%"),
+    paste0(target_dcc_rate$annual_high      * 100, "%"),
+    paste0(target_dcc_mortality$annual_high * 100, "%")
+  ),
+  Model_Predicted = c(
+    paste0(round(hcc_incidence_annual * 100, 2), "%"),
+    paste0(round(dcc_rate_annual      * 100, 2), "%"),
+    paste0(round(dcc_mort_annual      * 100, 1), "%")
+  ),
+  Pass = c(
+    ifelse(hcc_incidence_annual >= target_hcc_incidence$annual_low &
+           hcc_incidence_annual <= target_hcc_incidence$annual_high, "PASS", "FAIL"),
+    ifelse(dcc_rate_annual      >= target_dcc_rate$annual_low &
+           dcc_rate_annual      <= target_dcc_rate$annual_high, "PASS", "FAIL"),
+    ifelse(dcc_mort_annual      >= target_dcc_mortality$annual_low &
+           dcc_mort_annual      <= target_dcc_mortality$annual_high, "PASS", "FAIL")
+  ),
+  Source = c(
+    target_hcc_incidence$source,
+    target_dcc_rate$source,
+    target_dcc_mortality$source
+  ),
+  stringsAsFactors = FALSE
+)
+
+cat("\n============================================================\n")
+cat(" EXTERNAL VALIDATION SUMMARY\n")
+cat("============================================================\n")
+print(df_val_summary, row.names = FALSE)
+cat("============================================================\n\n")
+
+# ---- Plot A: State occupancy over time (LSM natural history) ----
+df_trace_lsm <- as.data.frame(trace_lsm)
+df_trace_lsm$Age   <- ages_trace
+df_trace_lsm$Cycle <- 0:n_cycles
+
+fibrosis_states <- c("F0","F1","F2","F3","F4_CC","DCC","HCC","Dead")
+
+df_trace_long <- df_trace_lsm %>%
+  select(Age, all_of(fibrosis_states)) %>%
+  pivot_longer(-Age, names_to = "State", values_to = "Proportion") %>%
+  mutate(State = factor(State, levels = fibrosis_states))
+
+state_colors <- c(
+  F0    = "#56B4E9", F1    = "#0072B2", F2  = "#009E73",
+  F3    = "#E69F00", F4_CC = "#D55E00", DCC = "#CC79A7",
+  HCC   = "#F0E442", Dead  = "gray40"
+)
+
+ggplot(df_trace_long, aes(x = Age, y = Proportion, fill = State)) +
+  geom_area(alpha = 0.85) +
+  scale_fill_manual(values = state_colors) +
+  scale_x_continuous("Age (years)", breaks = seq(10, 90, by = 10)) +
+  scale_y_continuous("Proportion of cohort", labels = percent_format()) +
+  labs(title    = "Model-Predicted State Occupancy Over Time (LSM / Natural History)",
+       subtitle = "Starting cohort: F2/F3 adolescents at age 12; 80-year horizon") +
+  theme_bw(base_size = txtsize) +
+  theme(legend.position = "right")
+
+# ---- Plot B: Cumulative mortality under LSM ----
+df_dead <- df_trace_lsm %>%
+  mutate(pct_dead = Dead) %>%
+  select(Age, pct_dead)
+
+ggplot(df_dead, aes(x = Age, y = pct_dead)) +
+  geom_line(color = "gray30", linewidth = 1.1) +
+  scale_x_continuous("Age (years)", breaks = seq(10, 90, by = 10)) +
+  scale_y_continuous("Cumulative proportion dead", labels = percent_format()) +
+  labs(title    = "Model-Predicted Cumulative Mortality (LSM cohort)",
+       subtitle = "Includes background + disease-specific mortality") +
+  theme_bw(base_size = txtsize)
+
+```
+
