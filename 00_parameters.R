@@ -106,11 +106,16 @@ v_init <- c(F0 = 0,    F1 = 0,    F2 = 0.686, F3 = 0.314,
 ############################ Costs ##########################
 #############################################################
 
-# Annual state costs
+# Annual state costs, rebased to 2025 USD.
+# Source figures (2022 basis) inflated via MEPS PHC deflator (2022->2024)
+# then PCE (2024->2025), factor = 1.086235. See cost rebasing worksheet
+# for the full worked calculation and citations.
+# Post_LT cost basis still pending; LT complication add-on applied below
+# is unchanged from its original (non-inflation-adjusted) source.
 costs_base <- c(
-  F0=8698, F1=8698, F2=8698, F3=10372, F4_CC=42207,
-  DCC=195156, HCC=141615,
-  LT=262900,
+  F0=7672, F1=7672, F2=7672, F3=9149, F4_CC=37231,
+  DCC=172147, HCC=124919,
+  LT=252739,
   Post_LT=2344, Dead=0
 )
 
@@ -176,10 +181,13 @@ lt_add_cost_high  <- sum(lt_comp_cost_high  * lt_comp_probs_high)
 costs_base["LT"] <- costs_base["LT"] + lt_add_cost_base
 
 ### Drug costs (annual)
+# cost_sema_base = NADAC Wegovy price, $1,302/mo x 12, Q1 2025 (already
+# current-year, no deflation needed) -- NBER Working Paper No. 34949, Table 1.
+# Low/high bounds are a provisional carryover pending a sourced 2025 range.
 cost_lsm        <- 0
-cost_sema_base  <- 14072     
-cost_sema_low   <- 4188    
-cost_sema_high  <- 16188    
+cost_sema_base  <- 15624
+cost_sema_low   <- 4188
+cost_sema_high  <- 16188
 
 drug_cost <- c(
   LSM         = cost_lsm,
