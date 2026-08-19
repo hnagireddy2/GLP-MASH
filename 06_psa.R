@@ -141,8 +141,7 @@ run_model_psa_iter_all <- function(psa_row) {
   cost_vec_psa["F4_CC"] <- psa_row$cost_F4_CC
   cost_vec_psa["DCC"]   <- psa_row$cost_DCC
   cost_vec_psa["HCC"]   <- psa_row$cost_HCC
-  for (st in c("LT_Y1", "LT_Y1_P"))
-    cost_vec_psa[st] <- 452682 + psa_row$cost_lt_add
+  cost_vec_psa["LT"]    <- 452682 + psa_row$cost_lt_add
 
   # Drug cost fixed at base case (no PSA uncertainty)
   drug_psa <- drug_cost
@@ -155,8 +154,7 @@ run_model_psa_iter_all <- function(psa_row) {
   qdec_psa["F4_CC"]    <- psa_row$qdec_F4_CC
   qdec_psa["DCC"]      <- psa_row$qdec_DCC
   qdec_psa["HCC"]      <- psa_row$qdec_HCC
-  qdec_psa["LT_Y1"]    <- psa_row$qdec_F4_CC
-  qdec_psa["LT_Y1_P"]  <- psa_row$qdec_F4_CC
+  qdec_psa["LT"]       <- psa_row$qdec_F4_CC
   qdec_psa["Post_LT"]  <- psa_row$qdec_PostLT
 
   util_mat_psa <- build_util_matrix(v_util_age_base, qdec_psa)

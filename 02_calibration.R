@@ -18,7 +18,7 @@ age_essence     <- 56.0
 cycle_offset_essence <- round((age_essence - age_start) / cycle_length)
 
 v_init_essence <- c(F0 = 0, F1 = 0, F2 = 0.313, F3 = 0.687, F4_CC = 0,
-                    DCC = 0, HCC = 0, LT_Y1 = 0, LT_Y1_P = 0,
+                    DCC = 0, HCC = 0, LT = 0,
                     Post_LT = 0, Dead = 0)
 
 # ---- 2. HCC/DCC transitions (single source: nonfib_annual, 00_parameters.R) ----

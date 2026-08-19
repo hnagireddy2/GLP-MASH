@@ -35,18 +35,16 @@ build_cycle_P <- function(rr_regress_now, rr_progress_now,
   ### Death from DC / HCC / LT / Post-LT
   P["DCC","Dead"]     <- clip01(p_prog_month_local$DCC_Death)
   P["HCC","Dead"]     <- clip01(p_prog_month_local$HCC_Death)
-  P["LT_Y1","Dead"]   <- clip01(p_prog_month_local$LT_Death)
-  P["LT_Y1_P","Dead"] <- clip01(p_prog_month_local$LT_Death)
-  P["Post_LT","Dead"] <- clip01(p_prog_month_local$PostLT_Death)  
-  
+  P["LT","Dead"]      <- clip01(p_prog_month_local$LT_Death)
+  P["Post_LT","Dead"] <- clip01(p_prog_month_local$PostLT_Death)
+
   ### Liver transplant
-  P["F4_CC","LT_Y1"] <- clip01(p_prog_month_local$F4_LT)
-  P["DCC","LT_Y1"]   <- clip01(p_prog_month_local$DCC_LT)
-  P["HCC","LT_Y1"]   <- clip01(p_prog_month_local$HCC_LT)
-  
+  P["F4_CC","LT"] <- clip01(p_prog_month_local$F4_LT)
+  P["DCC","LT"]   <- clip01(p_prog_month_local$DCC_LT)
+  P["HCC","LT"]   <- clip01(p_prog_month_local$HCC_LT)
+
   ### LT -> Post-LT
-  P["LT_Y1","Post_LT"]   <- clip01(p_prog_month_local$LT1_to_PostLT)
-  P["LT_Y1_P","Post_LT"] <- clip01(p_prog_month_local$LT1P_to_PostLT)
+  P["LT","Post_LT"] <- clip01(p_prog_month_local$LT_to_PostLT)
   P
 }
 
@@ -99,19 +97,26 @@ build_a_P <- function(rr_reg, rr_prog,
       P["Dead",]       <- 0
       P["Dead","Dead"] <- 1
 
-      ### Stay probabilities
+      ### Stay probabilities — death is protected; other transitions absorb
+      ### any overflow (death was already correctly combined via the
+      ### competing-risk formula above and must never be diluted by
+      ### rescaling it alongside the disease transitions)
       for(s in v_states){
         if(s != "Dead"){
-          row_sum <- sum(P[s,])
-          if(row_sum >= 1){
-            P[s,] <- P[s,] / row_sum
-          } else {
-            P[s,s] <- 1 - row_sum
+          p_death   <- P[s, "Dead"]
+          idx_other <- setdiff(v_states, c(s, "Dead"))
+          sum_other <- sum(P[s, idx_other])
+          max_other <- 1 - p_death
+
+          if(sum_other > max_other){
+            P[s, idx_other] <- P[s, idx_other] * (max_other / sum_other)
+            sum_other <- max_other
           }
+
+          P[s, s] <- 1 - p_death - sum_other
         }
       }
 
-      P <- row_normalize(P)
       a_P[,,t,stg] <- P
     }
   }

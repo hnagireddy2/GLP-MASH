@@ -91,26 +91,26 @@ n_cycles     <- ceiling(time_horizon / cycle_length)
 
 v_states <- c(
   "F0","F1","F2","F3","F4_CC","DCC",
-  "HCC","LT_Y1","LT_Y1_P","Post_LT","Dead"
+  "HCC","LT","Post_LT","Dead"
 )
 n_states <- length(v_states)
 
 treatments <- c("LSM", "Semaglutide")
 
-# Initial F2/F3 distribution based on normalizing NHANES-based F2/F3 distribution 
+# Initial F2/F3 distribution based on normalizing NHANES-based F2/F3 distribution
 v_init <- c(F0 = 0,    F1 = 0,    F2 = 0.686, F3 = 0.314,
             F4_CC = 0, DCC = 0,   HCC = 0,
-            LT_Y1_P = 0, LT_Y1 = 0, Post_LT = 0, Dead = 0)
+            LT = 0, Post_LT = 0, Dead = 0)
 
 #############################################################
 ############################ Costs ##########################
 #############################################################
 
-# Annual state costs 
+# Annual state costs
 costs_base <- c(
   F0=8698, F1=8698, F2=8698, F3=10372, F4_CC=42207,
   DCC=195156, HCC=141615,
-  LT_Y1_P=189782, LT_Y1=262900,
+  LT=262900,
   Post_LT=2344, Dead=0
 )
 
@@ -173,8 +173,7 @@ lt_add_cost_base  <- sum(lt_comp_cost       * lt_comp_probs)
 lt_add_cost_low   <- sum(lt_comp_cost_low   * lt_comp_probs_low)
 lt_add_cost_high  <- sum(lt_comp_cost_high  * lt_comp_probs_high)
 
-costs_base["LT_Y1"]   <- costs_base["LT_Y1"]   + lt_add_cost_base
-costs_base["LT_Y1_P"] <- costs_base["LT_Y1_P"] + lt_add_cost_base
+costs_base["LT"] <- costs_base["LT"] + lt_add_cost_base
 
 ### Drug costs (annual)
 cost_lsm        <- 0
@@ -231,7 +230,7 @@ age_vec <- c(12,25,35,45,55,65,75)
 util_age_base <- c(0.919,0.911,0.841,0.816,0.815,0.824,0.811)
 qaly_dec_base <- c(
   F0=0.016, F1=0.016, F2=0.016, F3=0.145, F4_CC=0.145,
-  HCC=0.165, DCC=0.155, LT_Y1=0.286, LT_Y1_P=0.286,
+  HCC=0.165, DCC=0.155, LT=0.286,
   Post_LT=0.036, Dead=1
 )
 
@@ -240,10 +239,10 @@ v_util_age_base <- approx(age_vec, util_age_base, ages_states, rule=2)$y
 
 state_order_for_util <- c(
   "F0","F1","F2","F3","F4_CC","HCC",
-  "DCC","LT_Y1","LT_Y1_P","Post_LT","Dead"
+  "DCC","LT","Post_LT","Dead"
 )
 
-#Builds age x state utility matrix (961 x 11) 
+#Builds age x state utility matrix (n_cycles+1 x n_states)
 build_util_matrix <- function(v_util_age, qdec){
   m <- sapply(state_order_for_util, function(st) {
     if (st=="Dead") rep(0,length(v_util_age))
@@ -278,8 +277,7 @@ nonfib_annual <- list(
   F4_LT         = 0.0,      # structural
   DCC_RegressF4 = 0.0,      # structural
   HCC_RegressF4 = 0.0,      # structural
-  LT1_to_PostLT = 1.0,      # structural (deterministic)
-  LT1P_to_PostLT= 1.0,      # structural (deterministic)
+  LT_to_PostLT  = 1.0,      # structural (deterministic) — LT is a single-cycle "transplant event/cost" state
   LT_Death      = 0.0400,   # Rustgi 2022 Table 1, liver-related mortality only (LRM)
   PostLT_Death  = 0.0820    # Rustgi 2022 Table 1, PLT row, liver-related mortality (LRM)
 )
@@ -303,8 +301,7 @@ p_prog_month <- list(
   F4_LT         = annual_to_month(nonfib_annual$F4_LT),
   DCC_RegressF4 = annual_to_month(nonfib_annual$DCC_RegressF4),
   HCC_RegressF4 = annual_to_month(nonfib_annual$HCC_RegressF4),
-  LT1_to_PostLT = nonfib_annual$LT1_to_PostLT,
-  LT1P_to_PostLT= nonfib_annual$LT1P_to_PostLT,
+  LT_to_PostLT  = nonfib_annual$LT_to_PostLT,
   LT_Death      = annual_to_month(nonfib_annual$LT_Death),
   PostLT_Death  = annual_to_month(nonfib_annual$PostLT_Death)
 )

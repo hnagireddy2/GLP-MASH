@@ -13,7 +13,7 @@ predict_progression_F2 <- function(p_prog_local) {
   final_F2 <- run_single_start(p_prog_local, "F2",
                                 cycle_offset = cycle_offset_essence)
   p_prog   <- sum(final_F2[c("F3", "F4_CC", "DCC", "HCC",
-                              "LT_Y1", "LT_Y1_P", "Post_LT")])
+                              "LT", "Post_LT")])
 
   expected_n <- p_prog * N_F2_placebo
   ci_lo <- qbinom(0.025, N_F2_placebo, p_prog)
@@ -49,7 +49,7 @@ age_hagstrom     <- 48.2
 cycle_offset_hagstrom <- round((age_hagstrom - age_start) / cycle_length)
 
 # Liver outcomes treated as "severe disease" for the Hagstrom validation
-severe_states <- c("DCC", "HCC", "LT_Y1", "LT_Y1_P", "Post_LT")
+severe_states <- c("DCC", "HCC", "LT", "Post_LT")
 
 # Untreated (LSM, no treatment effect) trace of cumulative proportion
 # reaching a severe state, starting from a single fibrosis stage.

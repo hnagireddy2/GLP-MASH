@@ -47,10 +47,8 @@ owsa_params[["state_costs"]] <- c(low = icer_cost_lo,
 ###### 4. LT complication costs (prob-weighted, low/high bounds)
 costs_lt_lo <- costs_base
 costs_lt_hi <- costs_base
-for (st in c("LT_Y1","LT_Y1_P")) {
-  costs_lt_lo[st] <- 452682 + lt_add_cost_low
-  costs_lt_hi[st] <- 452682 + lt_add_cost_high
-}
+costs_lt_lo["LT"] <- 452682 + lt_add_cost_low
+costs_lt_hi["LT"] <- 452682 + lt_add_cost_high
 
 icer_lt_lo <- run_owsa_icer(cost_vector = costs_lt_lo)
 icer_lt_hi <- run_owsa_icer(cost_vector = costs_lt_hi)
