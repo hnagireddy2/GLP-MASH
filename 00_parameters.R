@@ -73,17 +73,17 @@ apply_rr_at_trial_timescale <- function(p_cycle_baseline, RR,
 ########### Load Mortality + Background Costs ##############
 ############################################################
 
-mort_cost_df <- read.csv("~/GitHub/GLP-MASH/age_mort_background_costs.csv")
+mort_cost_df <- read.csv("age_mort_background_costs.csv")
 
 #############################################################
 ######################## Model Specs ########################
 #############################################################
 
-cycle_length <- 4 / 52.1429  # 4-week cycles 
+cycle_length <- 4 / 52.1429  # 4-week cycles
 age_start    <- 12
-time_horizon <- 80           # 80 years of cycles
+time_horizon <- 80           # 80 years
 age_end      <- age_start + time_horizon
-n_cycles     <- time_horizon / cycle_length   # 960 cycles
+n_cycles     <- ceiling(time_horizon / cycle_length)
 
 #############################################################
 ################## Health States + Initial ##################
@@ -202,8 +202,8 @@ v_wcc <- c(0.5, rep(1, n_cycles-1), 0.5)
 ######## Age-specific Mortality + Background Costs ##########
 #############################################################
 
-ages_states <- seq(age_start, age_end, by=cycle_length)
-ages_cycles <- ages_states[-length(ages_states)]
+ages_cycles <- age_start + (0:(n_cycles - 1)) * cycle_length   # length n_cycles
+ages_states <- age_start + (0:n_cycles)       * cycle_length   # length n_cycles + 1
 
 ## Overall background mortality (annual) -> monthly
 ## prob_to_rate -> rate_to_prob 
@@ -230,7 +230,7 @@ age_vec <- c(12,25,35,45,55,65,75)
 
 util_age_base <- c(0.919,0.911,0.841,0.816,0.815,0.824,0.811)
 qaly_dec_base <- c(
-  Healthy=0, F0=0.016, F1=0.016, F2=0.016, F3=0.145, F4_CC=0.145,
+  F0=0.016, F1=0.016, F2=0.016, F3=0.145, F4_CC=0.145,
   HCC=0.165, DCC=0.155, LT_Y1=0.286, LT_Y1_P=0.286,
   Post_LT=0.036, Dead=1
 )

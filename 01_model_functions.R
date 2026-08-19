@@ -9,7 +9,7 @@ apply_rr <- function(p, rr) {
   if (rr != 1.0) apply_rr_at_trial_timescale(p, rr) else p
 }
 
-build_cycle_P <- function(rr_regress_now, rr_progress_now, age_t,
+build_cycle_P <- function(rr_regress_now, rr_progress_now,
                           p_prog_month_local = p_prog_month) {
   
   P <- matrix(0, n_states, n_states, dimnames=list(v_states,v_states))
@@ -77,8 +77,6 @@ build_a_P <- function(rr_reg, rr_prog,
 
     for(t in 1:n_cycles){
 
-      age_t <- age_start + (t-1)*cycle_length
-
       if(dur_stg > 0 && t >= start_stg && t < (start_stg + dur_stg)){
         rrreg <- rr_reg[stg]
         rrprog<- rr_prog[stg]
@@ -87,7 +85,7 @@ build_a_P <- function(rr_reg, rr_prog,
         rrprog<- 1.0
       }
 
-      P <- build_cycle_P(rrreg, rrprog, age_t, p_prog_month_local)
+      P <- build_cycle_P(rrreg, rrprog, p_prog_month_local)
 
       ### Add age-specific background mortality 
       p_bg_t <- v_p_bg_month[t]
@@ -161,11 +159,8 @@ summarize_outcomes <- function(trace, drug_cost_per_year,
     on_vec[1:idx_end] <- 1
      }
 
-    treat_year_marker <- ceiling(cumsum(on_vec) / round(1/cycle_length))  
-    treat_year_marker[on_vec == 0] <- 0
-
-    years_treated <- length(unique(treat_year_marker[treat_year_marker > 0]))
-    total_drug_cost <- drug_cost_per_year * years_treated
+    years_on_treat  <- sum(on_vec) * cycle_length
+    total_drug_cost <- drug_cost_per_year * years_on_treat
 
     v_cost_drug_cycle <- rep(0, n_cycles + 1)
     if (sum(on_vec) > 0) {
