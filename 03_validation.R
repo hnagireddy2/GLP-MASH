@@ -48,11 +48,17 @@ target_hagstrom <- data.frame(
 age_hagstrom     <- 48.2
 cycle_offset_hagstrom <- round((age_hagstrom - age_start) / cycle_length)
 
-time_to_severe <- function(start_state, threshold = 0.10) {
-  
+# Liver outcomes treated as "severe disease" for the Hagstrom validation
+severe_states <- c("DCC", "HCC", "LT_Y1", "LT_Y1_P", "Post_LT")
+
+# Untreated (LSM, no treatment effect) trace of cumulative proportion
+# reaching a severe state, starting from a single fibrosis stage.
+# Shared by time_to_severe() and plot_severe_trajectory().
+pct_severe_trace <- function(start_state) {
+
   v_init_val <- setNames(rep(0, n_states), v_states)
   v_init_val[start_state] <- 1
-  
+
   aP_val <- build_a_P(
     rr_reg             = c(LSM = 1, Semaglutide = 1),
     rr_prog            = c(LSM = 1, Semaglutide = 1),
@@ -60,15 +66,15 @@ time_to_severe <- function(start_state, threshold = 0.10) {
     treat_dur_cycles   = c(LSM = 0L, Semaglutide = 0L),
     treat_start_cycles = c(LSM = 1L, Semaglutide = 1L)
   )
-  
+
   max_cyc <- n_cycles - cycle_offset_hagstrom
-  
+
   m_tr <- matrix(0, nrow = max_cyc + 1, ncol = n_states,
                dimnames = list(NULL, v_states))
   m_tr[1, ] <- v_init_val
-  
+
   # Make severe states absorbing
-  for (s in c("DCC", "HCC", "LT_Y1", "LT_Y1_P", "Post_LT")) {
+  for (s in severe_states) {
     for (cyc in 1:dim(aP_val)[3]) {
       aP_val[s, , cyc, "LSM"] <- 0
       aP_val[s, s, cyc, "LSM"] <- 1
@@ -80,15 +86,18 @@ time_to_severe <- function(start_state, threshold = 0.10) {
     m_tr[t + 1, ] <- m_tr[t, ] %*% aP_val[,,cycle_offset_hagstrom + t,"LSM"]
   }
 
-  severe_states <- c("DCC", "HCC", "LT_Y1", "LT_Y1_P", "Post_LT")
-  pct_severe <- rowSums(m_tr[1:(max_cyc + 1), severe_states])
+  rowSums(m_tr[1:(max_cyc + 1), severe_states])
+}
 
+time_to_severe <- function(start_state, threshold = 0.10) {
+
+  pct_severe <- pct_severe_trace(start_state)
   cycle_at_threshold <- which(pct_severe >= threshold)[1]
-  
+
   if (is.na(cycle_at_threshold)) {
     return(NA_real_)
   }
-  
+
   (cycle_at_threshold - 1) * cycle_length
 }
 
@@ -119,49 +128,18 @@ cat("==========================================================\n\n")
 
 # Plot: Time-to-severe trajectories for each starting stage
 plot_severe_trajectory <- function() {
-  
+
   starting_stages <- c("F0", "F1", "F2", "F3", "F4_CC")
-  
+  max_cyc <- n_cycles - cycle_offset_hagstrom
+
   trajectories <- lapply(starting_stages, function(stg) {
-    v_init_val <- setNames(rep(0, n_states), v_states)
-    v_init_val[stg] <- 1
-    
-    aP_val <- build_a_P(
-      rr_reg             = c(LSM = 1, Semaglutide = 1),
-      rr_prog            = c(LSM = 1, Semaglutide = 1),
-      p_prog_month_local = p_prog_month,
-      treat_dur_cycles   = c(LSM = 0L, Semaglutide = 0L),
-      treat_start_cycles = c(LSM = 1L, Semaglutide = 1L)
-    )
-    
-    max_cyc <- n_cycles - cycle_offset_hagstrom
-    m_tr <- matrix(0, nrow = max_cyc + 1, ncol = n_states,
-                   dimnames = list(NULL, v_states))
-    m_tr[1, ] <- v_init_val
-    
-    # Make severe states absorbing
-    for (s in c("DCC", "HCC", "LT_Y1", "LT_Y1_P", "Post_LT")) {
-      for (cyc in 1:dim(aP_val)[3]) {
-        aP_val[s, , cyc, "LSM"] <- 0
-        aP_val[s, s, cyc, "LSM"] <- 1
-      }
-    }
-
-    # Run the Markov trace
-    for (t in 1:max_cyc) {
-      m_tr[t + 1, ] <- m_tr[t, ] %*% aP_val[,,cycle_offset_hagstrom + t,"LSM"]
-    }
-
-    severe_states <- c("DCC", "HCC", "LT_Y1", "LT_Y1_P", "Post_LT")
-    pct_severe <- rowSums(m_tr[1:(max_cyc + 1), severe_states])
-    
     data.frame(
-      Stage      = stg,
-      Year       = (0:max_cyc) * cycle_length,
-      PctSevere  = pct_severe
+      Stage     = stg,
+      Year      = (0:max_cyc) * cycle_length,
+      PctSevere = pct_severe_trace(stg)
     )
   })
-  
+
   df_traj <- do.call(rbind, trajectories) %>%
     filter(Year <= 40)
   

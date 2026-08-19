@@ -20,6 +20,14 @@ generate_psa_params <- function(n_sim) {
     list(shape1 = max(alpha, 0.01), shape2 = max(beta, 0.01))
   }
   se_from_range <- function(lo, hi) (hi - lo) / 4
+  rgamma_ci <- function(n, mean, lo, hi) {
+    p <- gamma_params(mean, se_from_range(lo, hi))
+    rgamma(n, p$shape, scale = p$scale)
+  }
+  rbeta_se <- function(n, mean, se) {
+    p <- beta_params(mean, se)
+    rbeta(n, p$shape1, p$shape2)
+  }
 
   df <- data.frame(
 
@@ -31,114 +39,50 @@ generate_psa_params <- function(n_sim) {
                               meanlog = log(0.5785),
                               sdlog   = 0.2116),
 
-    ## FIBROSIS TRANSITION HAZARDS (annual, gamma) 
-    h_F0_F1 = rgamma(n_sim,
-                     gamma_params(0.100, se_from_range(0.077, 0.132))$shape,
-                     scale = gamma_params(0.100, se_from_range(0.077, 0.132))$scale),
-    h_F1_F0 = rgamma(n_sim,
-                     gamma_params(0.025, se_from_range(0.014, 0.046))$shape,
-                     scale = gamma_params(0.025, se_from_range(0.014, 0.046))$scale),
-    h_F1_F2 = rgamma(n_sim,
-                     gamma_params(0.097, se_from_range(0.068, 0.137))$shape,
-                     scale = gamma_params(0.097, se_from_range(0.068, 0.137))$scale),
-    h_F2_F1 = rgamma(n_sim,
-                     gamma_params(0.049, se_from_range(0.023, 0.105))$shape,
-                     scale = gamma_params(0.049, se_from_range(0.023, 0.105))$scale),
-    h_F2_F3 = rgamma(n_sim,
-                     gamma_params(0.075, se_from_range(0.061, 0.092))$shape,
-                     scale = gamma_params(0.075, se_from_range(0.061, 0.092))$scale),
-    h_F3_F2 = rgamma(n_sim,
-                     gamma_params(0.080, se_from_range(0.046, 0.138))$shape,
-                     scale = gamma_params(0.080, se_from_range(0.046, 0.138))$scale),
-    h_F3_F4 = rgamma(n_sim,
-                     gamma_params(0.045, se_from_range(0.033, 0.060))$shape,
-                     scale = gamma_params(0.045, se_from_range(0.033, 0.060))$scale),
-    h_F4_F3 = rgamma(n_sim,
-                     gamma_params(0.047, se_from_range(0.021, 0.108))$shape,
-                     scale = gamma_params(0.047, se_from_range(0.021, 0.108))$scale),
+    ## FIBROSIS TRANSITION HAZARDS (annual, gamma)
+    h_F0_F1 = rgamma_ci(n_sim, 0.100, 0.077, 0.132),
+    h_F1_F0 = rgamma_ci(n_sim, 0.025, 0.014, 0.046),
+    h_F1_F2 = rgamma_ci(n_sim, 0.097, 0.068, 0.137),
+    h_F2_F1 = rgamma_ci(n_sim, 0.049, 0.023, 0.105),
+    h_F2_F3 = rgamma_ci(n_sim, 0.075, 0.061, 0.092),
+    h_F3_F2 = rgamma_ci(n_sim, 0.080, 0.046, 0.138),
+    h_F3_F4 = rgamma_ci(n_sim, 0.045, 0.033, 0.060),
+    h_F4_F3 = rgamma_ci(n_sim, 0.047, 0.021, 0.108),
 
     ## Advanced-disease hazards (annual). Means = base case (nonfib_annual);
     ## ranges = 95% CI from Kim S1 SEs, or Kim's 20%-of-mean rule for the
     ## Rustgi-sourced LT transitions. se_from_range() recovers SE = range/4.
-    h_F3_HCC    = rgamma(n_sim,
-                         gamma_params(0.0034, se_from_range(0.0021, 0.0047))$shape,
-                         scale = gamma_params(0.0034, se_from_range(0.0021, 0.0047))$scale),
-    h_F4_HCC    = rgamma(n_sim,
-                         gamma_params(0.0378, se_from_range(0.0213, 0.0543))$shape,
-                         scale = gamma_params(0.0378, se_from_range(0.0213, 0.0543))$scale),
-    h_F4_DCC    = rgamma(n_sim,
-                         gamma_params(0.0659, se_from_range(0.0400, 0.0918))$shape,
-                         scale = gamma_params(0.0659, se_from_range(0.0400, 0.0918))$scale),
-    h_DCC_HCC   = rgamma(n_sim,
-                         gamma_params(0.0378, se_from_range(0.0213, 0.0543))$shape,
-                         scale = gamma_params(0.0378, se_from_range(0.0213, 0.0543))$scale),
-    h_DCC_LT    = rgamma(n_sim,
-                         gamma_params(0.0230, se_from_range(0.0140, 0.0320))$shape,
-                         scale = gamma_params(0.0230, se_from_range(0.0140, 0.0320))$scale),
-    h_DCC_Death = rgamma(n_sim,
-                         gamma_params(0.20, se_from_range(0.1216, 0.2784))$shape,
-                         scale = gamma_params(0.20, se_from_range(0.1216, 0.2784))$scale),
-    h_HCC_LT    = rgamma(n_sim,
-                         gamma_params(0.0300, se_from_range(0.0182, 0.0418))$shape,
-                         scale = gamma_params(0.0300, se_from_range(0.0182, 0.0418))$scale),
-    h_HCC_Death = rgamma(n_sim,
-                         gamma_params(0.1305, se_from_range(0.1049, 0.1561))$shape,
-                         scale = gamma_params(0.1305, se_from_range(0.1049, 0.1561))$scale),
-    h_LT_Death  = rgamma(n_sim,
-                         gamma_params(0.0400, se_from_range(0.0243, 0.0557))$shape,
-                         scale = gamma_params(0.0400, se_from_range(0.0243, 0.0557))$scale),
-    h_PostLT_Death = rgamma(n_sim,
-                            gamma_params(0.0820, se_from_range(0.0499, 0.1141))$shape,
-                            scale = gamma_params(0.0820, se_from_range(0.0499, 0.1141))$scale),
+    h_F3_HCC       = rgamma_ci(n_sim, 0.0034, 0.0021, 0.0047),
+    h_F4_HCC       = rgamma_ci(n_sim, 0.0378, 0.0213, 0.0543),
+    h_F4_DCC       = rgamma_ci(n_sim, 0.0659, 0.0400, 0.0918),
+    h_DCC_HCC      = rgamma_ci(n_sim, 0.0378, 0.0213, 0.0543),
+    h_DCC_LT       = rgamma_ci(n_sim, 0.0230, 0.0140, 0.0320),
+    h_DCC_Death    = rgamma_ci(n_sim, 0.20,   0.1216, 0.2784),
+    h_HCC_LT       = rgamma_ci(n_sim, 0.0300, 0.0182, 0.0418),
+    h_HCC_Death    = rgamma_ci(n_sim, 0.1305, 0.1049, 0.1561),
+    h_LT_Death     = rgamma_ci(n_sim, 0.0400, 0.0243, 0.0557),
+    h_PostLT_Death = rgamma_ci(n_sim, 0.0820, 0.0499, 0.1141),
 
-    ## STATE COSTS (gamma) 
-    cost_F0_F2 = rgamma(n_sim,
-                    gamma_params(8698, se_from_range(6958, 10436))$shape,
-                    scale = gamma_params(8698, se_from_range(6958, 10436))$scale),
-    
+    ## STATE COSTS (gamma)
+    cost_F0_F2 = rgamma_ci(n_sim, 8698, 6958, 10436),
+
     ## STATE COSTS (gamma) — drawn then rank-ordered to enforce F3 < F4_CC < HCC < DCC
-    cost_F3_raw    = rgamma(n_sim,
-                       gamma_params(10372,  se_from_range(8297,   12447))$shape,
-                       scale = gamma_params(10372,  se_from_range(8297,   12447))$scale),
-    cost_F4_CC_raw = rgamma(n_sim,
-                       gamma_params(42207,  se_from_range(33766,  50650))$shape,
-                       scale = gamma_params(42207,  se_from_range(33766,  50650))$scale),
-    cost_HCC_raw   = rgamma(n_sim,
-                       gamma_params(141615, se_from_range(113292, 169939))$shape,
-                       scale = gamma_params(141615, se_from_range(113292, 169939))$scale),
-    cost_DCC_raw   = rgamma(n_sim,
-                       gamma_params(195156, se_from_range(156125, 234187))$shape,
-                       scale = gamma_params(195156, se_from_range(156125, 234187))$scale),
-   
-    ## LT complication additional cost (gamma)
-    cost_lt_add = rgamma(n_sim,
-                         gamma_params(lt_add_cost_base,
-                                      se_from_range(lt_add_cost_low,
-                                                    lt_add_cost_high))$shape,
-                         scale = gamma_params(lt_add_cost_base,
-                                              se_from_range(lt_add_cost_low,
-                                                          lt_add_cost_high))$scale),
+    cost_F3_raw    = rgamma_ci(n_sim, 10372,  8297,   12447),
+    cost_F4_CC_raw = rgamma_ci(n_sim, 42207,  33766,  50650),
+    cost_HCC_raw   = rgamma_ci(n_sim, 141615, 113292, 169939),
+    cost_DCC_raw   = rgamma_ci(n_sim, 195156, 156125, 234187),
 
-    ## HEALTH STATE UTILITIES (decrement, beta) 
+    ## LT complication additional cost (gamma)
+    cost_lt_add = rgamma_ci(n_sim, lt_add_cost_base, lt_add_cost_low, lt_add_cost_high),
+
+    ## HEALTH STATE UTILITIES (decrement, beta)
     # SE is capped inside beta_params() to keep alpha/beta positive
-    qdec_F0_F2  = rbeta(n_sim,
-                        beta_params(0.016, 0.016 * 0.10)$shape1,
-                        beta_params(0.016, 0.016 * 0.10)$shape2),
-    qdec_F3     = rbeta(n_sim,
-                        beta_params(0.145, 0.145 * 0.10)$shape1,
-                        beta_params(0.145, 0.145 * 0.10)$shape2),
-    qdec_F4_CC  = rbeta(n_sim,
-                        beta_params(0.145, 0.145 * 0.10)$shape1,
-                        beta_params(0.145, 0.145 * 0.10)$shape2),
-    qdec_DCC    = rbeta(n_sim,
-                        beta_params(0.155, 0.155 * 0.10)$shape1,
-                        beta_params(0.155, 0.155 * 0.10)$shape2),
-    qdec_HCC    = rbeta(n_sim,
-                        beta_params(0.165, 0.165 * 0.10)$shape1,
-                        beta_params(0.165, 0.165 * 0.10)$shape2),
-    qdec_PostLT = rbeta(n_sim,
-                        beta_params(0.036, 0.036 * 0.10)$shape1,
-                        beta_params(0.036, 0.036 * 0.10)$shape2)
+    qdec_F0_F2  = rbeta_se(n_sim, 0.016, 0.016 * 0.10),
+    qdec_F3     = rbeta_se(n_sim, 0.145, 0.145 * 0.10),
+    qdec_F4_CC  = rbeta_se(n_sim, 0.145, 0.145 * 0.10),
+    qdec_DCC    = rbeta_se(n_sim, 0.155, 0.155 * 0.10),
+    qdec_HCC    = rbeta_se(n_sim, 0.165, 0.165 * 0.10),
+    qdec_PostLT = rbeta_se(n_sim, 0.036, 0.036 * 0.10)
 
   )
 # Enforce rank order: F3 < F4_CC < HCC < DCC
@@ -217,66 +161,15 @@ run_model_psa_iter_all <- function(psa_row) {
 
   util_mat_psa <- build_util_matrix(v_util_age_base, qdec_psa)
 
-  ## ---- Strategy 1: LSM (no treatment, natural history) ----
-  aP_lsm <- build_a_P(rr_reg_psa, rr_prog_psa,
-                      p_prog_month_local = p_cycle_psa,
-                      treat_dur_cycles   = c(LSM = 0L, Semaglutide = 0L),
-                      treat_start_cycles = treat_start_immediate)
-
-  traces_lsm <- lapply(treatments, function(stg)
-    run_markov(aP_lsm[,,,stg], v_init))
-  names(traces_lsm) <- treatments
-
-  res_lsm <- summarize_strategies(
-    traces_lsm, "LSM",
-    util_mat_psa, v_background_cost_cycle,
-    cost_vec_psa, drug_psa,
-    treat_dur_cycles_vec = c(LSM = 0L, Semaglutide = 0L)
-  )
-
-  ## ---- Strategy 2: Treat at 12 (72 weeks starting immediately) ----
-  aP_12 <- build_a_P(rr_reg_psa, rr_prog_psa,
-                     p_prog_month_local = p_cycle_psa,
-                     treat_dur_cycles   = treat_dur_72w_cycles,
-                     treat_start_cycles = treat_start_immediate)
-
-  traces_12 <- lapply(treatments, function(stg)
-    run_markov(aP_12[,,,stg], v_init))
-  names(traces_12) <- treatments
-
-  res_12 <- summarize_strategies(
-    traces_12, "Age12",
-    util_mat_psa, v_background_cost_cycle,
-    cost_vec_psa, drug_psa,
-    treat_dur_cycles_vec = treat_dur_72w_cycles
-  )
-
-  ## ---- Strategy 3: Wait until 18 (natural history age 12-18, then 72 weeks) ----
-  aP_18 <- build_a_P(rr_reg_psa, rr_prog_psa,
-                     p_prog_month_local = p_cycle_psa,
-                     treat_dur_cycles   = treat_dur_72w_cycles,
-                     treat_start_cycles = treat_start_age18)
-
-  traces_18 <- lapply(treatments, function(stg)
-    run_markov(aP_18[,,,stg], v_init))
-  names(traces_18) <- treatments
-
-  res_18 <- summarize_strategies(
-    traces_18, "Age18",
-    util_mat_psa, v_background_cost_cycle,
-    cost_vec_psa, drug_psa,
-    treat_dur_cycles_vec = treat_dur_72w_cycles
-  )
-
-  ## ---- Return named list with 3 strategies ----
-  list(
-    "LSM"               = c(Cost = res_lsm$Cost[res_lsm$Strategy == "LSM"],
-                            QALY = res_lsm$QALY[res_lsm$Strategy == "LSM"]),
-    "Sema 72w (Age 12)" = c(Cost = res_12$Cost[res_12$Strategy == "Semaglutide"],
-                            QALY = res_12$QALY[res_12$Strategy == "Semaglutide"]),
-    "Sema 72w (Age 18)" = c(Cost = res_18$Cost[res_18$Strategy == "Semaglutide"],
-                            QALY = res_18$QALY[res_18$Strategy == "Semaglutide"])
-  )
+  ## ---- LSM / Age12 / Age18, all three strategies at once ----
+  ## (LSM always has treat_dur_cycles == 0, so its trace already comes
+  ## out of the "Age12" run below — no need for a separate LSM-only build.)
+  run_three_strategies(rr_reg_psa, rr_prog_psa,
+                       p_prog_month_local   = p_cycle_psa,
+                       util_matrix           = util_mat_psa,
+                       cost_vector           = cost_vec_psa,
+                       drug_cost_vec         = drug_psa,
+                       treat_dur_cycles_vec  = treat_dur_72w_cycles)
 }
 
 #############################################################

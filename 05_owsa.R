@@ -80,14 +80,19 @@ base_icer <- run_owsa_icer()
 wtp_threshold    <- 150000
 
 calculate_ce_out_mash <- function(l_params, n_wtp = wtp_threshold) {
-  
-  # Override global discount vectors
+
+  # Override global discount vectors for this scenario; on.exit guarantees
+  # they're restored even if something below errors out
   v_dwc_saved <- v_dwc
   v_dwu_saved <- v_dwu
+  on.exit({
+    v_dwc <<- v_dwc_saved
+    v_dwu <<- v_dwu_saved
+  })
   disc <- l_params[["Discount rate"]]
   v_dwc <<- 1/(1+disc)^((0:n_cycles)*cycle_length)
   v_dwu <<- 1/(1+disc)^((0:n_cycles)*cycle_length)
-  
+
   rr_reg_loc  <- rr_regress
   rr_reg_loc["Semaglutide"]  <- l_params[["Semaglutide regression RR"]]
 
@@ -104,46 +109,22 @@ calculate_ce_out_mash <- function(l_params, n_wtp = wtp_threshold) {
 
   prog_sc <- l_params[["Transition probabilities (0.75x-1.25x)"]]
   p_prog_loc <- p_prog_month
-  p_prog_loc$F0_F1 <- rate_to_prob(prob_to_rate(p_prog_month$F0_F1, cycle_length) * prog_sc, cycle_length)
-  p_prog_loc$F1_F0 <- rate_to_prob(prob_to_rate(p_prog_month$F1_F0, cycle_length) * prog_sc, cycle_length)
-  p_prog_loc$F1_F2 <- rate_to_prob(prob_to_rate(p_prog_month$F1_F2, cycle_length) * prog_sc, cycle_length)
-  p_prog_loc$F2_F1 <- rate_to_prob(prob_to_rate(p_prog_month$F2_F1, cycle_length) * prog_sc, cycle_length)
-  p_prog_loc$F2_F3 <- rate_to_prob(prob_to_rate(p_prog_month$F2_F3, cycle_length) * prog_sc, cycle_length)
-  p_prog_loc$F3_F2 <- rate_to_prob(prob_to_rate(p_prog_month$F3_F2, cycle_length) * prog_sc, cycle_length)
-  p_prog_loc$F3_F4 <- rate_to_prob(prob_to_rate(p_prog_month$F3_F4, cycle_length) * prog_sc, cycle_length)
-  p_prog_loc$F4_F3 <- rate_to_prob(prob_to_rate(p_prog_month$F4_F3, cycle_length) * prog_sc, cycle_length)
+  fib_transitions <- c("F0_F1", "F1_F0", "F1_F2", "F2_F1",
+                       "F2_F3", "F3_F2", "F3_F4", "F4_F3")
+  for (nm in fib_transitions) {
+    p_prog_loc[[nm]] <- rate_to_prob(prob_to_rate(p_prog_month[[nm]], cycle_length) * prog_sc,
+                                     cycle_length)
+  }
   p_prog_loc$DCC_Death <- annual_to_month(l_params[["DCC->Death (annual)"]])
   p_prog_loc$HCC_Death <- annual_to_month(l_params[["HCC->Death (annual)"]])
   p_prog_loc$F4_DCC    <- annual_to_month(l_params[["F4->DCC (annual)"]])
 
-  aP_12 <- build_a_P(rr_reg_loc, rr_prog_loc,
-                     p_prog_month_local = p_prog_loc,
-                     treat_dur_cycles   = treat_dur_72w_cycles,
-                     treat_start_cycles = treat_start_immediate)
-  traces_12 <- lapply(treatments, function(stg) run_markov(aP_12[,,,stg], v_init))
-  names(traces_12) <- treatments
-  res_12 <- summarize_strategies(traces_12, "Age12",
-                                 util_mat_loc, v_background_cost_cycle,
-                                 cost_loc, drug_loc, treat_dur_72w_cycles)
-
-  aP_18 <- build_a_P(rr_reg_loc, rr_prog_loc,
-                     p_prog_month_local = p_prog_loc,
-                     treat_dur_cycles   = treat_dur_72w_cycles,
-                     treat_start_cycles = treat_start_age18)
-  traces_18 <- lapply(treatments, function(stg) run_markov(aP_18[,,,stg], v_init))
-  names(traces_18) <- treatments
-  res_18 <- summarize_strategies(traces_18, "Age18",
-                                 util_mat_loc, v_background_cost_cycle,
-                                 cost_loc, drug_loc, treat_dur_72w_cycles)
-
-  results <- list(
-    "LSM"               = c(Cost = res_12$Cost[res_12$Strategy == "LSM"],
-                            QALY = res_12$QALY[res_12$Strategy == "LSM"]),
-    "Sema 72w (Age 12)" = c(Cost = res_12$Cost[res_12$Strategy == "Semaglutide"],
-                            QALY = res_12$QALY[res_12$Strategy == "Semaglutide"]),
-    "Sema 72w (Age 18)" = c(Cost = res_18$Cost[res_18$Strategy == "Semaglutide"],
-                            QALY = res_18$QALY[res_18$Strategy == "Semaglutide"])
-  )
+  results <- run_three_strategies(rr_reg_loc, rr_prog_loc,
+                                  p_prog_month_local  = p_prog_loc,
+                                  util_matrix          = util_mat_loc,
+                                  cost_vector           = cost_loc,
+                                  drug_cost_vec         = drug_loc,
+                                  treat_dur_cycles_vec  = treat_dur_72w_cycles)
 
   df_out <- data.frame(
     Strategy = names(results),
@@ -152,11 +133,7 @@ calculate_ce_out_mash <- function(l_params, n_wtp = wtp_threshold) {
     stringsAsFactors = FALSE
   )
   df_out$NMB <- df_out$Effect * n_wtp - df_out$Cost
-  
-  # Restore global discount vectors
-  v_dwc <<- v_dwc_saved
-  v_dwu <<- v_dwu_saved
-  
+
   df_out
 }
 

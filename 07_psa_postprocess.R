@@ -73,10 +73,6 @@ l_psa_all <- make_psa_obj(
 ## ---- Compute PSA means and run calculate_icers -----------------------------
 psa_means_all <- summary(l_psa_all)
 
-# CEAC and ELC using strategies
-ceac_obj <- ceac(wtp = v_wtp, psa = l_psa_all)
-elc_obj  <- calc_exp_loss(wtp = v_wtp, psa = l_psa_all)
-
 icer_psa_all <- calculate_icers(
   cost       = psa_means_all$meanCost,
   effect     = psa_means_all$meanEffect,
@@ -124,14 +120,7 @@ okabe_ito_9 <- c(
 )
 names(okabe_ito_9) <- all_strat_labels
 
-# ── 1. Build PSA object ─────────────────────────────────────
-l_psa_all <- make_psa_obj(
-  cost          = df_c_all[, all_strat_labels],
-  effectiveness = df_e_all[, all_strat_labels],
-  parameters    = df_psa_input_all,
-  strategies    = all_strat_labels
-)
- 
+# l_psa_all already built above; reused here for the CEAC/ELC/frontier plots
 v_wtp_all <- seq(0, 600000, by = 10000)
 
 # ── 2. Post-PSA Cost-Effectiveness Plane (mean estimates) ───

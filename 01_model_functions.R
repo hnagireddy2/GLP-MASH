@@ -289,5 +289,51 @@ run_strategy <- function(treat_start, label) {
   )
 }
 
+#############################################################
+######### run_three_strategies: LSM / Age12 / Age18 #########
+#############################################################
+# Shared by calculate_ce_out_mash() (05_owsa.R) and
+# run_model_psa_iter_all() (06_psa.R). LSM always has
+# treat_dur_cycles == 0, so its trace from the "Age12" run
+# (treat_start_immediate) is identical to a separately-run
+# natural-history LSM trace — no need to build it twice.
+
+run_three_strategies <- function(rr_reg, rr_prog,
+                                 p_prog_month_local  = p_prog_month,
+                                 util_matrix         = m_util_base,
+                                 cost_vector         = costs_base,
+                                 drug_cost_vec       = drug_cost,
+                                 bg_cost_cycle_vec   = v_background_cost_cycle,
+                                 treat_dur_cycles_vec = treat_dur_72w_cycles,
+                                 v_init_vec          = v_init) {
+
+  aP_12 <- build_a_P(rr_reg, rr_prog,
+                     p_prog_month_local = p_prog_month_local,
+                     treat_dur_cycles   = treat_dur_cycles_vec,
+                     treat_start_cycles = treat_start_immediate)
+  traces_12 <- lapply(treatments, function(stg) run_markov(aP_12[,,,stg], v_init_vec))
+  names(traces_12) <- treatments
+  res_12 <- summarize_strategies(traces_12, "Age12", util_matrix, bg_cost_cycle_vec,
+                                 cost_vector, drug_cost_vec, treat_dur_cycles_vec)
+
+  aP_18 <- build_a_P(rr_reg, rr_prog,
+                     p_prog_month_local = p_prog_month_local,
+                     treat_dur_cycles   = treat_dur_cycles_vec,
+                     treat_start_cycles = treat_start_age18)
+  traces_18 <- lapply(treatments, function(stg) run_markov(aP_18[,,,stg], v_init_vec))
+  names(traces_18) <- treatments
+  res_18 <- summarize_strategies(traces_18, "Age18", util_matrix, bg_cost_cycle_vec,
+                                 cost_vector, drug_cost_vec, treat_dur_cycles_vec)
+
+  list(
+    "LSM"               = c(Cost = res_12$Cost[res_12$Strategy == "LSM"],
+                            QALY = res_12$QALY[res_12$Strategy == "LSM"]),
+    "Sema 72w (Age 12)" = c(Cost = res_12$Cost[res_12$Strategy == "Semaglutide"],
+                            QALY = res_12$QALY[res_12$Strategy == "Semaglutide"]),
+    "Sema 72w (Age 18)" = c(Cost = res_18$Cost[res_18$Strategy == "Semaglutide"],
+                            QALY = res_18$QALY[res_18$Strategy == "Semaglutide"])
+  )
+}
+
 cat("01_model_functions.R loaded.\n")
 

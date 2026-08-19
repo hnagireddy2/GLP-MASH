@@ -120,9 +120,12 @@ ggplot(df_dead, aes(x = Age, y = pct_dead)) +
        subtitle = "Includes background + disease-specific mortality") +
   theme_bw(base_size = txtsize)
 
-cat("04_base_case.R complete.\n")
-
+# ---- Sanity check: each cycle's cohort trace should sum to ~1 ----
+# (confirms build_a_P()'s transition matrices are properly row-normalized)
 row_sums <- rowSums(trace_lsm)
-cat("Min row sum:", min(row_sums), "\n")
-cat("Max row sum:", max(row_sums), "\n")
-cat("Any below 0.999?", any(row_sums < 0.999), "\n")
+cat("\nTrace row-sum check (LSM cohort, should be ~1 every cycle):\n")
+cat("  Min row sum:", min(row_sums), "\n")
+cat("  Max row sum:", max(row_sums), "\n")
+cat("  Any below 0.999?", any(row_sums < 0.999), "\n")
+
+cat("\n04_base_case.R complete.\n")
