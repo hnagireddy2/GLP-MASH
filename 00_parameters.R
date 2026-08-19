@@ -3,12 +3,14 @@
 # transition probabilities, treatment effects, scenarios.
 # No model execution happens here.
 
+setwd("~/GitHub/GLP-MASH") 
+
 rm(list = ls())
 
 ## Libraries
 library(dplyr)
 library(tidyr)
-library(ggplot2)
+library(ggplot2) 
 library(ggrepel)
 library(scales)      
 library(dampack)
@@ -28,8 +30,12 @@ okabe_ito_strat <- c(
 ######################   Functions  ########################
 ############################################################
 
-prob_to_rate  <- function(p, t = 1) -(1/t) * log(1 - p)
-rate_to_prob  <- function(r, t = 1) 1 - exp(-r * t)
+prob_to_rate <- function(p, t = 1) {
+  -log(1 - p) / t
+}
+rate_to_prob <- function(r, t = 1) {
+  1 - exp(-r * t)
+}
 row_normalize <- function(m) sweep(m, 1, rowSums(m), FUN = "/")
 
 clip01        <- function(x) pmin(pmax(x, 0), 0.999)
@@ -73,7 +79,7 @@ apply_rr_at_trial_timescale <- function(p_cycle_baseline, RR,
 ########### Load Mortality + Background Costs ##############
 ############################################################
 
-mort_cost_df <- read.csv("~/GitHub/GLP-MASH/age_mort_background_costs.csv")
+mort_cost_df <- read.csv("age_mort_background_costs.csv")
 
 #############################################################
 ######################## Model Specs ########################
@@ -81,26 +87,23 @@ mort_cost_df <- read.csv("~/GitHub/GLP-MASH/age_mort_background_costs.csv")
 
 cycle_length <- 4 / 52.1429  # 4-week cycles 
 age_start    <- 12
-time_horizon <- 80           # 80 years of cycles
-age_end      <- age_start + time_horizon
-n_cycles     <- time_horizon / cycle_length   # 960 cycles
+age_max      <- max(mort_cost_df$age)
+time_horizon <- age_max - age_start
+n_cycles     <- ceiling(time_horizon / cycle_length)
 
 #############################################################
 ################## Health States + Initial ##################
 #############################################################
 
-v_states <- c(
-  "F0","F1","F2","F3","F4_CC","DCC",
-  "HCC","LT_Y1","LT_Y1_P","Post_LT","Dead"
-)
+v_states <- c("F0","F1","F2","F3","F4_CC","DCC","HCC","LT_Y1","Post_LT","Dead")
+
 n_states <- length(v_states)
 
 treatments <- c("LSM", "Semaglutide")
 
 # Initial F2/F3 distribution based on normalizing NHANES-based F2/F3 distribution 
 v_init <- c(F0 = 0,    F1 = 0,    F2 = 0.686, F3 = 0.314,
-            F4_CC = 0, DCC = 0,   HCC = 0,
-            LT_Y1_P = 0, LT_Y1 = 0, Post_LT = 0, Dead = 0)
+            F4_CC = 0, DCC = 0,   HCC = 0, LT_Y1 = 0, Post_LT = 0, Dead = 0)
 
 #############################################################
 ############################ Costs ##########################
@@ -109,72 +112,11 @@ v_init <- c(F0 = 0,    F1 = 0,    F2 = 0.686, F3 = 0.314,
 # Annual state costs 
 costs_base <- c(
   F0=8698, F1=8698, F2=8698, F3=10372, F4_CC=42207,
-  DCC=195156, HCC=141615,
-  LT_Y1_P=189782, LT_Y1=262900,
+  DCC=195156, HCC=141615, LT_Y1=262900,
   Post_LT=2344, Dead=0
 )
 
-### LT Complications 
-
-# Vector of probabilities for each LT complication 
-lt_comp_probs <- c(
-  acr=0.2, biliary_comp=0.105, HAT=0.0545, skin_infection=0.19,
-  pneumonia=0.155, bloodstream_inf=0.29, peritonitis=0.0765,
-  uti=0.17, cdiff=0.0385, other_infection=0.55,
-  VTE=0.034, reoperation=0.125, primary_nonfxn=0.226,
-  HVS=0.035, renal_failure=0.1
-)
-
-# Lower Bounds Vector 
-lt_comp_probs_low <- c(
-  acr=0.15, biliary_comp=0.02, HAT=0.019,
-  skin_infection=0.13, pneumonia=0.08, bloodstream_inf=0.19,
-  peritonitis=0.063, uti=0.16, cdiff=0.027,
-  other_infection=0.41, VTE=0.02, reoperation=0.08,
-  primary_nonfxn=0.052, HVS=0.01, renal_failure=0.05
-)
-
-lt_comp_probs_high <- c(
-  acr=0.25, biliary_comp=0.19, HAT=0.09, skin_infection=0.26,
-  pneumonia=0.23, bloodstream_inf=0.40, peritonitis=0.09,
-  uti=0.18, cdiff=0.05, other_infection=0.69, VTE=0.04,
-  reoperation=0.22, primary_nonfxn=0.40, HVS=0.06, renal_failure=0.20
-)
-
-# Vector of costs for each LT complication 
-lt_comp_cost <- c(
-  acr=28950, biliary_comp=54943, HAT=112834, skin_infection=3915,
-  pneumonia=80291, bloodstream_inf=102690, peritonitis=119762,
-  uti=68730, cdiff=46091, other_infection=68063,
-  VTE=53165, reoperation=111674, primary_nonfxn=107031,
-  HVS=73838, renal_failure=82524
-)
-
-# Lower Bounds Vector
-lt_comp_cost_low <- c(
-  acr=14476, biliary_comp=27472, HAT=56418, skin_infection=1958,
-  pneumonia=40145, bloodstream_inf=51345, peritonitis=59882,
-  uti=34366, cdiff=23046, other_infection=34032,
-  VTE=26583, reoperation=55838, primary_nonfxn=53516,
-  HVS=36919, renal_failure=41262
-)
-
-# Upper Bounds Vector
-lt_comp_cost_high <- c(
-  acr=43425, biliary_comp=82415, HAT=169252, skin_infection=5874,
-  pneumonia=120436, bloodstream_inf=154036, peritonitis=179645,
-  uti=103095, cdiff=69137, other_infection=102095,
-  VTE=79816, reoperation=167512, primary_nonfxn=160547,
-  HVS=110756, renal_failure=123785
-)
-
-### Expected added cost from LT complications
-lt_add_cost_base  <- sum(lt_comp_cost       * lt_comp_probs)
-lt_add_cost_low   <- sum(lt_comp_cost_low   * lt_comp_probs_low)
-lt_add_cost_high  <- sum(lt_comp_cost_high  * lt_comp_probs_high)
-
-costs_base["LT_Y1"]   <- costs_base["LT_Y1"]   + lt_add_cost_base
-costs_base["LT_Y1_P"] <- costs_base["LT_Y1_P"] + lt_add_cost_base
+costs_cycle <- costs_base * cycle_length 
 
 ### Drug costs (annual)
 cost_lsm        <- 0
@@ -202,13 +144,13 @@ v_wcc <- c(0.5, rep(1, n_cycles-1), 0.5)
 ######## Age-specific Mortality + Background Costs ##########
 #############################################################
 
-ages_states <- seq(age_start, age_end, by=cycle_length)
-ages_cycles <- ages_states[-length(ages_states)]
+ages_cycles <- age_start + (0:(n_cycles - 1)) * cycle_length   # length n_cycles
+ages_states <- age_start + (0:n_cycles)       * cycle_length   # length n_cycles + 1
 
 ## Overall background mortality (annual) -> monthly
 ## prob_to_rate -> rate_to_prob 
-v_p_bg_annual <- approx(mort_cost_df$Age,
-                        mort_cost_df$overall_mortality_avg,
+v_p_bg_annual <- approx(mort_cost_df$age,
+                        mort_cost_df$background_mortality_prob,
                         ages_cycles, rule=2)$y
 
 v_r_bg_annual <- prob_to_rate(v_p_bg_annual)               # hazard per year
@@ -216,8 +158,8 @@ v_p_bg_month  <- rate_to_prob(v_r_bg_annual, cycle_length) # monthly prob
 
 ## Background costs
 v_background_cost_annual <-
-  approx(mort_cost_df$Age,
-         mort_cost_df$background_cost_2025,
+  approx(mort_cost_df$age,
+         mort_cost_df$mean_background_cost_2025,
          ages_cycles, rule = 2)$y   
 
 v_background_cost_cycle <- v_background_cost_annual * cycle_length
@@ -231,7 +173,7 @@ age_vec <- c(12,25,35,45,55,65,75)
 util_age_base <- c(0.919,0.911,0.841,0.816,0.815,0.824,0.811)
 qaly_dec_base <- c(
   Healthy=0, F0=0.016, F1=0.016, F2=0.016, F3=0.145, F4_CC=0.145,
-  HCC=0.165, DCC=0.155, LT_Y1=0.286, LT_Y1_P=0.286,
+  HCC=0.165, DCC=0.155, LT_Y1=0.286,
   Post_LT=0.036, Dead=1
 )
 
@@ -240,7 +182,7 @@ v_util_age_base <- approx(age_vec, util_age_base, ages_states, rule=2)$y
 
 state_order_for_util <- c(
   "F0","F1","F2","F3","F4_CC","HCC",
-  "DCC","LT_Y1","LT_Y1_P","Post_LT","Dead"
+  "DCC","LT_Y1","Post_LT","Dead"
 )
 
 #Builds age x state utility matrix (961 x 11) 
@@ -272,16 +214,15 @@ nonfib_annual <- list(
   F4_DCC        = 0.0659,   # Kim 2025 Suppl. Table 1 (6.59%) -> Younossi 2020
   DCC_HCC       = 0.0378,   # Kim 2025 Suppl. Table 1 (3.78%) -> Orci 2022
   DCC_LT        = 0.023,    # Rustgi 2022 Table 1 (DCC -> LT)
-  DCC_Death     = 0.20,     # Kim 2025 Suppl. Table 1 (DC -> liver death) -> Estes 2018
+  DCC_Death     = 0.1549,   # Rustgi 2022 Table 1 (DCC -> Death)
   HCC_LT        = 0.03,     # Rustgi 2022 Table 1 (HCC -> LT)
-  HCC_Death     = 0.1305,   # Kim 2025 Suppl. Table 1 (HCC -> liver death) -> SEER
+  HCC_Death     = 0.1305,   # Kim 2025 Suppl. Table 1 (13.05%) 
   F4_LT         = 0.0,      # structural
   DCC_RegressF4 = 0.0,      # structural
   HCC_RegressF4 = 0.0,      # structural
-  LT1_to_PostLT = 1.0,      # structural (deterministic)
-  LT1P_to_PostLT= 1.0,      # structural (deterministic)
-  LT_Death      = 0.0400,   # Rustgi 2022 Table 1, liver-related mortality only (LRM)
-  PostLT_Death  = 0.0820    # Rustgi 2022 Table 1, PLT row, liver-related mortality (LRM)
+  LT_Y1_Post_LT = 1.0,       # structural (deterministic)
+  LT_Y1_Death    = 0.0909,     # Rustgi 2022 Table 1, liver-related mortality only (LRM)
+  Post_LT_Death      = 0.0909   # Rustgi 2022 Table 1, liver-related mortality only (LRM)
 )
 
 # Convert to monthly probabilities (except the deterministic post-LT ones)
@@ -303,10 +244,9 @@ p_prog_month <- list(
   F4_LT         = annual_to_month(nonfib_annual$F4_LT),
   DCC_RegressF4 = annual_to_month(nonfib_annual$DCC_RegressF4),
   HCC_RegressF4 = annual_to_month(nonfib_annual$HCC_RegressF4),
-  LT1_to_PostLT = nonfib_annual$LT1_to_PostLT,
-  LT1P_to_PostLT= nonfib_annual$LT1P_to_PostLT,
-  LT_Death      = annual_to_month(nonfib_annual$LT_Death),
-  PostLT_Death  = annual_to_month(nonfib_annual$PostLT_Death)
+  LT_Y1_Post_LT   = nonfib_annual$LT_Y1_Post_LT,
+  LT_Y1_Death    = annual_to_month(nonfib_annual$LT_Y1_Death),
+  Post_LT_Death  = annual_to_month(nonfib_annual$Post_LT_Death)
 )
 
 #############################################################
@@ -396,8 +336,6 @@ rr_progress <- c(
 ##############################################################
 ########################### SCENARIOS ########################
 ##############################################################
-# Moved here from later in the Rmd so that base_treat_dur_cycles
-# is available when build_a_P uses it as a default argument.
 
 # Only one duration: 72 weeks (ESSENCE trial duration)
 treat_dur_72w_years <- 72/52   # ~1.385 years

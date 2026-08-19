@@ -84,7 +84,7 @@ df_trace_lsm <- as.data.frame(trace_lsm)
 df_trace_lsm$Age   <- ages_trace
 df_trace_lsm$Cycle <- 0:n_cycles
 
-fibrosis_states <- c("F0","F1","F2","F3","F4_CC","DCC","HCC","Dead")
+fibrosis_states <- c("F0","F1","F2","F3","F4_CC","DCC","HCC","LT_Y1","Post_LT","Dead")
 
 df_trace_long <- df_trace_lsm %>%
   select(Age, all_of(fibrosis_states)) %>%

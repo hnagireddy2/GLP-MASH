@@ -13,7 +13,7 @@ predict_progression_F2 <- function(p_prog_local) {
   final_F2 <- run_single_start(p_prog_local, "F2",
                                 cycle_offset = cycle_offset_essence)
   p_prog   <- sum(final_F2[c("F3", "F4_CC", "DCC", "HCC",
-                              "LT_Y1", "LT_Y1_P", "Post_LT")])
+                              "LT_Y1", "Post_LT")])
 
   expected_n <- p_prog * N_F2_placebo
   ci_lo <- qbinom(0.025, N_F2_placebo, p_prog)
@@ -68,7 +68,7 @@ time_to_severe <- function(start_state, threshold = 0.10) {
   m_tr[1, ] <- v_init_val
   
   # Make severe states absorbing
-  for (s in c("DCC", "HCC", "LT_Y1", "LT_Y1_P", "Post_LT")) {
+  for (s in c("DCC", "HCC", "LT_Y1", "Post_LT")) {
     for (cyc in 1:dim(aP_val)[3]) {
       aP_val[s, , cyc, "LSM"] <- 0
       aP_val[s, s, cyc, "LSM"] <- 1
@@ -80,7 +80,7 @@ time_to_severe <- function(start_state, threshold = 0.10) {
     m_tr[t + 1, ] <- m_tr[t, ] %*% aP_val[,,cycle_offset_hagstrom + t,"LSM"]
   }
 
-  severe_states <- c("DCC", "HCC", "LT_Y1", "LT_Y1_P", "Post_LT")
+  severe_states <- c("DCC", "HCC", "LT_Y1", "Post_LT")
   pct_severe <- rowSums(m_tr[1:(max_cyc + 1), severe_states])
 
   cycle_at_threshold <- which(pct_severe >= threshold)[1]
@@ -140,7 +140,7 @@ plot_severe_trajectory <- function() {
     m_tr[1, ] <- v_init_val
     
     # Make severe states absorbing
-    for (s in c("DCC", "HCC", "LT_Y1", "LT_Y1_P", "Post_LT")) {
+    for (s in c("DCC", "HCC", "LT_Y1", "Post_LT")) {
       for (cyc in 1:dim(aP_val)[3]) {
         aP_val[s, , cyc, "LSM"] <- 0
         aP_val[s, s, cyc, "LSM"] <- 1
@@ -152,7 +152,7 @@ plot_severe_trajectory <- function() {
       m_tr[t + 1, ] <- m_tr[t, ] %*% aP_val[,,cycle_offset_hagstrom + t,"LSM"]
     }
 
-    severe_states <- c("DCC", "HCC", "LT_Y1", "LT_Y1_P", "Post_LT")
+    severe_states <- c("DCC", "HCC", "LT_Y1", "Post_LT")
     pct_severe <- rowSums(m_tr[1:(max_cyc + 1), severe_states])
     
     data.frame(

@@ -35,9 +35,8 @@ build_cycle_P <- function(rr_regress_now, rr_progress_now, age_t,
   ### Death from DC / HCC / LT / Post-LT
   P["DCC","Dead"]     <- clip01(p_prog_month_local$DCC_Death)
   P["HCC","Dead"]     <- clip01(p_prog_month_local$HCC_Death)
-  P["LT_Y1","Dead"]   <- clip01(p_prog_month_local$LT_Death)
-  P["LT_Y1_P","Dead"] <- clip01(p_prog_month_local$LT_Death)
-  P["Post_LT","Dead"] <- clip01(p_prog_month_local$PostLT_Death)  
+  P["LT_Y1","Dead"]    <- clip01(p_prog_month_local$LT_Y1_Death)
+  P["Post_LT","Dead"]  <- clip01(p_prog_month_local$Post_LT_Death) 
   
   ### Liver transplant
   P["F4_CC","LT_Y1"] <- clip01(p_prog_month_local$F4_LT)
@@ -45,8 +44,7 @@ build_cycle_P <- function(rr_regress_now, rr_progress_now, age_t,
   P["HCC","LT_Y1"]   <- clip01(p_prog_month_local$HCC_LT)
   
   ### LT -> Post-LT
-  P["LT_Y1","Post_LT"]   <- clip01(p_prog_month_local$LT1_to_PostLT)
-  P["LT_Y1_P","Post_LT"] <- clip01(p_prog_month_local$LT1P_to_PostLT)
+  P["LT_Y1","Post_LT"] <- clip01(p_prog_month_local$LT_Y1_Post_LT)
   P
 }
 
@@ -172,10 +170,10 @@ summarize_outcomes <- function(trace, drug_cost_per_year,
      v_cost_drug_cycle[on_vec == 1] <- total_drug_cost / sum(on_vec)
       }
 
-  # Background cost 
-  alive <- 1 - trace[, "Dead"]
-  bg_cost_extended <- c(bg_cost_cycle[1], bg_cost_cycle)
-  v_bg_cost_cycle <- bg_cost_extended * alive
+  # Background cost (only for post_LT)
+    stopifnot(length(bg_cost_cycle) == n_cycles)
+    bg_cost_extended <- c(bg_cost_cycle[1], bg_cost_cycle)   
+    v_bg_cost_cycle  <- bg_cost_extended * trace[, "Post_LT"]
 
   # Total cost
   v_cost_total <- v_cost_state_cycle + v_cost_drug_cycle + v_bg_cost_cycle
@@ -295,4 +293,3 @@ run_strategy <- function(treat_start, label) {
 }
 
 cat("01_model_functions.R loaded.\n")
-

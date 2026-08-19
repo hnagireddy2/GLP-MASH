@@ -58,8 +58,8 @@ generate_psa_params <- function(n_sim) {
                      scale = gamma_params(0.047, se_from_range(0.021, 0.108))$scale),
 
     ## Advanced-disease hazards (annual). Means = base case (nonfib_annual);
-    ## ranges = 95% CI from Kim S1 SEs, or Kim's 20%-of-mean rule for the
-    ## Rustgi-sourced LT transitions. se_from_range() recovers SE = range/4.
+    ## ranges = 95% CI from Kim S1 SEs, or Kim 20%-of-mean rule for the
+    ## Rustgi-sourced LT transitions. se_from_range() recovers SE = range/4 
     h_F3_HCC    = rgamma(n_sim,
                          gamma_params(0.0034, se_from_range(0.0021, 0.0047))$shape,
                          scale = gamma_params(0.0034, se_from_range(0.0021, 0.0047))$scale),
@@ -141,13 +141,18 @@ generate_psa_params <- function(n_sim) {
                         beta_params(0.036, 0.036 * 0.10)$shape2)
 
   )
-# Enforce rank order: F3 < F4_CC < HCC < DCC
-  cost_ordered <- t(apply(cbind(df$cost_F3_raw, df$cost_F4_CC_raw,
-                                df$cost_HCC_raw, df$cost_DCC_raw), 1, sort))
-  df$cost_F3    <- cost_ordered[, 1]
-  df$cost_F4_CC <- cost_ordered[, 2]
-  df$cost_HCC   <- cost_ordered[, 3]
-  df$cost_DCC   <- cost_ordered[, 4]
+# Keep costs in order of F3 < F4_CC < HCC < DCC
+  induce_order <- function(X, rho = 0.9) {
+    M <- matrix(rho, ncol(X), ncol(X)); diag(M) <- 1
+    R <- matrix(rnorm(length(X)), nrow(X)) %*% chol(M)
+    sapply(seq_len(ncol(X)), function(j) sort(X[, j])[rank(R[, j], ties.method = "first")])
+  }
+  
+  X <- cbind(df$cost_F3_raw, df$cost_F4_CC_raw, df$cost_HCC_raw, df$cost_DCC_raw)
+  X <- induce_order(X, rho = 0.9)
+  
+  df$cost_F3 <- X[,1]; df$cost_F4_CC <- X[,2]
+  df$cost_HCC <- X[,3]; df$cost_DCC <- X[,4]
   df$cost_F3_raw <- df$cost_F4_CC_raw <- df$cost_HCC_raw <- df$cost_DCC_raw <- NULL
 
   return(df)
@@ -164,9 +169,7 @@ run_model_psa_iter_all <- function(psa_row) {
   rr_reg_psa  <- rr_regress;  rr_reg_psa["Semaglutide"]  <- psa_row$rr_sema_regress
   rr_prog_psa <- rr_progress; rr_prog_psa["Semaglutide"] <- psa_row$rr_sema_progress
   
-  ## All sampled hazards are ANNUAL probabilities; annual_to_month() does the
-  ## prob -> rate -> cycle conversion, same as how the base case is built,
-  ## so the PSA is centered on base. pmin() guards prob_to_rate at p<1.
+  ## All sampled hazards are annual probabilities; pmin() guards prob_to_rate at p<1.
   amh <- function(p) annual_to_month(pmin(p, 0.999))
   
   p_cycle_psa <- p_prog_month          # seed from base case, then overwrite sampled cells
@@ -313,15 +316,6 @@ n_sim_all <- 1000
   saveRDS(list(df_c_all = df_c_all, df_e_all = df_e_all,
                df_psa_input_all = df_psa_input_all),
           "psa_results_all.rds")
-
-  # Comment out the closing bracket and the else block:
-  # } else {
-  #   all_psa          <- readRDS("psa_results_all.rds")
-  #   df_c_all         <- all_psa$df_c_all
-  #   df_e_all         <- all_psa$df_e_all
-  #   df_psa_input_all <- all_psa$df_psa_input_all
-  #   cat("Loaded all-strategy PSA results from cache.\n")
-  # }
 
 test_res <- run_model_psa_iter_all(df_psa_input_all[1, ])
 cat("Labels returned by function:\n")
