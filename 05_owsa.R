@@ -44,15 +44,15 @@ icer_cost_hi <- run_owsa_icer(cost_vector = cost_hi)
 owsa_params[["state_costs"]] <- c(low = icer_cost_lo,
                                      high = icer_cost_hi)
 
-###### 4. LT complication costs (prob-weighted, low/high bounds)
+###### 4. LT procedure cost (sourced low/high bounds)
 costs_lt_lo <- costs_base
 costs_lt_hi <- costs_base
-costs_lt_lo["LT"] <- 452682 + lt_add_cost_low
-costs_lt_hi["LT"] <- 452682 + lt_add_cost_high
+costs_lt_lo["LT"] <- costs_low["LT"]
+costs_lt_hi["LT"] <- costs_high["LT"]
 
 icer_lt_lo <- run_owsa_icer(cost_vector = costs_lt_lo)
 icer_lt_hi <- run_owsa_icer(cost_vector = costs_lt_hi)
-owsa_params[["lt_comp_costs"]] <- c(low = icer_lt_lo, high = icer_lt_hi)
+owsa_params[["lt_cost"]] <- c(low = icer_lt_lo, high = icer_lt_hi)
 
 ###### 5. Annual cost of semaglutide
 lo_drug <- drug_cost; lo_drug["Semaglutide"] <- cost_sema_low

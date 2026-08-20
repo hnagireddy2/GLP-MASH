@@ -110,8 +110,9 @@ v_init <- c(F0 = 0,    F1 = 0,    F2 = 0.686, F3 = 0.314,
 # Source figures (2022 basis) inflated via MEPS PHC deflator (2022->2024)
 # then PCE (2024->2025), factor = 1.086235. See cost rebasing worksheet
 # for the full worked calculation and citations.
-# Post_LT cost basis still pending; LT complication add-on applied below
-# is unchanged from its original (non-inflation-adjusted) source.
+# Post_LT cost basis still pending. LT is the transplant procedure cost
+# only (no separate complications add-on -- removed; procedure cost is
+# taken as already inclusive).
 costs_base <- c(
   F0=7672, F1=7672, F2=7672, F3=9149, F4_CC=37231,
   DCC=172147, HCC=124919,
@@ -119,66 +120,19 @@ costs_base <- c(
   Post_LT=2344, Dead=0
 )
 
-### LT Complications 
-
-# Vector of probabilities for each LT complication 
-lt_comp_probs <- c(
-  acr=0.2, biliary_comp=0.105, HAT=0.0545, skin_infection=0.19,
-  pneumonia=0.155, bloodstream_inf=0.29, peritonitis=0.0765,
-  uti=0.17, cdiff=0.0385, other_infection=0.55,
-  VTE=0.034, reoperation=0.125, primary_nonfxn=0.226,
-  HVS=0.035, renal_failure=0.1
+# Low/high bounds for the costs above (same 2025 rebasing factor applied
+# to the original 2022 low/high figures). PSA recovers each cost's SE
+# from these via se_from_ci95() -- see 06_psa.R.
+costs_low <- c(
+  F0=6137, F1=6137, F2=6137, F3=7319, F4_CC=29785,
+  DCC=137717, HCC=99935,
+  LT=202192
 )
-
-# Lower Bounds Vector 
-lt_comp_probs_low <- c(
-  acr=0.15, biliary_comp=0.02, HAT=0.019,
-  skin_infection=0.13, pneumonia=0.08, bloodstream_inf=0.19,
-  peritonitis=0.063, uti=0.16, cdiff=0.027,
-  other_infection=0.41, VTE=0.02, reoperation=0.08,
-  primary_nonfxn=0.052, HVS=0.01, renal_failure=0.05
+costs_high <- c(
+  F0=9206, F1=9206, F2=9206, F3=10980, F4_CC=44678,
+  DCC=206576, HCC=149903,
+  LT=303287
 )
-
-lt_comp_probs_high <- c(
-  acr=0.25, biliary_comp=0.19, HAT=0.09, skin_infection=0.26,
-  pneumonia=0.23, bloodstream_inf=0.40, peritonitis=0.09,
-  uti=0.18, cdiff=0.05, other_infection=0.69, VTE=0.04,
-  reoperation=0.22, primary_nonfxn=0.40, HVS=0.06, renal_failure=0.20
-)
-
-# Vector of costs for each LT complication 
-lt_comp_cost <- c(
-  acr=28950, biliary_comp=54943, HAT=112834, skin_infection=3915,
-  pneumonia=80291, bloodstream_inf=102690, peritonitis=119762,
-  uti=68730, cdiff=46091, other_infection=68063,
-  VTE=53165, reoperation=111674, primary_nonfxn=107031,
-  HVS=73838, renal_failure=82524
-)
-
-# Lower Bounds Vector
-lt_comp_cost_low <- c(
-  acr=14476, biliary_comp=27472, HAT=56418, skin_infection=1958,
-  pneumonia=40145, bloodstream_inf=51345, peritonitis=59882,
-  uti=34366, cdiff=23046, other_infection=34032,
-  VTE=26583, reoperation=55838, primary_nonfxn=53516,
-  HVS=36919, renal_failure=41262
-)
-
-# Upper Bounds Vector
-lt_comp_cost_high <- c(
-  acr=43425, biliary_comp=82415, HAT=169252, skin_infection=5874,
-  pneumonia=120436, bloodstream_inf=154036, peritonitis=179645,
-  uti=103095, cdiff=69137, other_infection=102095,
-  VTE=79816, reoperation=167512, primary_nonfxn=160547,
-  HVS=110756, renal_failure=123785
-)
-
-### Expected added cost from LT complications
-lt_add_cost_base  <- sum(lt_comp_cost       * lt_comp_probs)
-lt_add_cost_low   <- sum(lt_comp_cost_low   * lt_comp_probs_low)
-lt_add_cost_high  <- sum(lt_comp_cost_high  * lt_comp_probs_high)
-
-costs_base["LT"] <- costs_base["LT"] + lt_add_cost_base
 
 ### Drug costs (annual)
 # cost_sema_base = NADAC Wegovy price, $1,302/mo x 12, Q1 2025 (already

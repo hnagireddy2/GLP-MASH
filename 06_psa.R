@@ -19,9 +19,14 @@ generate_psa_params <- function(n_sim) {
     beta  <- (1-mean) * (mean*(1-mean)/se^2 - 1)
     list(shape1 = max(alpha, 0.01), shape2 = max(beta, 0.01))
   }
-  se_from_range <- function(lo, hi) (hi - lo) / 4
+  ## SE implied by a reported 95% CI, assuming it was built as mean +/-
+  ## 1.96*SE (the standard normal-approximation relationship). Verified
+  ## exactly against this model's literature-sourced hazard CIs -- e.g.
+  ## h_DCC_Death's (0.1216, 0.2784) bounds reconstruct only when SE = 0.04,
+  ## which is exactly what this formula returns.
+  se_from_ci95 <- function(lo, hi) (hi - lo) / (2 * 1.96)
   rgamma_ci <- function(n, mean, lo, hi) {
-    p <- gamma_params(mean, se_from_range(lo, hi))
+    p <- gamma_params(mean, se_from_ci95(lo, hi))
     rgamma(n, p$shape, scale = p$scale)
   }
   rbeta_se <- function(n, mean, se) {
@@ -51,7 +56,7 @@ generate_psa_params <- function(n_sim) {
 
     ## Advanced-disease hazards (annual). Means = base case (nonfib_annual);
     ## ranges = 95% CI from Kim S1 SEs, or Kim's 20%-of-mean rule for the
-    ## Rustgi-sourced LT transitions. se_from_range() recovers SE = range/4.
+    ## Rustgi-sourced LT transitions. se_from_ci95() recovers the exact SE.
     h_F3_HCC       = rgamma_ci(n_sim, 0.0034, 0.0021, 0.0047),
     h_F4_HCC       = rgamma_ci(n_sim, 0.0378, 0.0213, 0.0543),
     h_F4_DCC       = rgamma_ci(n_sim, 0.0659, 0.0400, 0.0918),
@@ -63,17 +68,18 @@ generate_psa_params <- function(n_sim) {
     h_LT_Death     = rgamma_ci(n_sim, 0.0400, 0.0243, 0.0557),
     h_PostLT_Death = rgamma_ci(n_sim, 0.0820, 0.0499, 0.1141),
 
-    ## STATE COSTS (gamma)
-    cost_F0_F2 = rgamma_ci(n_sim, 8698, 6958, 10436),
+    ## STATE COSTS (gamma) -- means/ranges from costs_base/costs_low/costs_high
+    ## (00_parameters.R) so PSA always tracks the base-case cost inputs.
+    cost_F0_F2 = rgamma_ci(n_sim, costs_base["F0"], costs_low["F0"], costs_high["F0"]),
 
     ## STATE COSTS (gamma) — drawn then rank-ordered to enforce F3 < F4_CC < HCC < DCC
-    cost_F3_raw    = rgamma_ci(n_sim, 10372,  8297,   12447),
-    cost_F4_CC_raw = rgamma_ci(n_sim, 42207,  33766,  50650),
-    cost_HCC_raw   = rgamma_ci(n_sim, 141615, 113292, 169939),
-    cost_DCC_raw   = rgamma_ci(n_sim, 195156, 156125, 234187),
+    cost_F3_raw    = rgamma_ci(n_sim, costs_base["F3"],    costs_low["F3"],    costs_high["F3"]),
+    cost_F4_CC_raw = rgamma_ci(n_sim, costs_base["F4_CC"], costs_low["F4_CC"], costs_high["F4_CC"]),
+    cost_HCC_raw   = rgamma_ci(n_sim, costs_base["HCC"],   costs_low["HCC"],   costs_high["HCC"]),
+    cost_DCC_raw   = rgamma_ci(n_sim, costs_base["DCC"],   costs_low["DCC"],   costs_high["DCC"]),
 
-    ## LT complication additional cost (gamma)
-    cost_lt_add = rgamma_ci(n_sim, lt_add_cost_base, lt_add_cost_low, lt_add_cost_high),
+    ## LT procedure cost (gamma)
+    cost_LT = rgamma_ci(n_sim, costs_base["LT"], costs_low["LT"], costs_high["LT"]),
 
     ## HEALTH STATE UTILITIES (decrement, beta)
     # SE is capped inside beta_params() to keep alpha/beta positive
@@ -141,7 +147,7 @@ run_model_psa_iter_all <- function(psa_row) {
   cost_vec_psa["F4_CC"] <- psa_row$cost_F4_CC
   cost_vec_psa["DCC"]   <- psa_row$cost_DCC
   cost_vec_psa["HCC"]   <- psa_row$cost_HCC
-  cost_vec_psa["LT"]    <- 452682 + psa_row$cost_lt_add
+  cost_vec_psa["LT"]    <- psa_row$cost_LT
 
   # Drug cost fixed at base case (no PSA uncertainty)
   drug_psa <- drug_cost
