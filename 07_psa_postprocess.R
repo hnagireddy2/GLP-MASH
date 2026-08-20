@@ -36,6 +36,7 @@ param_display_names <- c(
   qdec_F4_CC       = "Util dec: F4/CC",
   qdec_DCC         = "Util dec: DCC",
   qdec_HCC         = "Util dec: HCC",
+  qdec_LT          = "Util dec: LT",
   qdec_PostLT      = "Util dec: Post-LT"
 )
 

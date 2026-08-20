@@ -91,12 +91,13 @@ generate_psa_params <- function(n_sim) {
 
     ## HEALTH STATE UTILITIES (decrement, beta)
     # SE is capped inside beta_params() to keep alpha/beta positive
-    qdec_F0_F2  = rbeta_se(n_sim, 0.016, 0.016 * 0.10),
-    qdec_F3     = rbeta_se(n_sim, 0.145, 0.145 * 0.10),
-    qdec_F4_CC  = rbeta_se(n_sim, 0.145, 0.145 * 0.10),
-    qdec_DCC    = rbeta_se(n_sim, 0.155, 0.155 * 0.10),
-    qdec_HCC    = rbeta_se(n_sim, 0.165, 0.165 * 0.10),
-    qdec_PostLT = rbeta_se(n_sim, 0.036, 0.036 * 0.10)
+    qdec_F0_F2  = rbeta_se(n_sim, qaly_dec_base["F0"],      qaly_dec_base["F0"]      * 0.10),
+    qdec_F3     = rbeta_se(n_sim, qaly_dec_base["F3"],      qaly_dec_base["F3"]      * 0.10),
+    qdec_F4_CC  = rbeta_se(n_sim, qaly_dec_base["F4_CC"],   qaly_dec_base["F4_CC"]   * 0.10),
+    qdec_DCC    = rbeta_se(n_sim, qaly_dec_base["DCC"],     qaly_dec_base["DCC"]     * 0.10),
+    qdec_HCC    = rbeta_se(n_sim, qaly_dec_base["HCC"],     qaly_dec_base["HCC"]     * 0.10),
+    qdec_LT     = rbeta_se(n_sim, qaly_dec_base["LT"],      qaly_dec_base["LT"]      * 0.10),
+    qdec_PostLT = rbeta_se(n_sim, qaly_dec_base["Post_LT"], qaly_dec_base["Post_LT"] * 0.10)
 
   )
 # Enforce rank order: F3 < F4_CC < HCC < DCC
@@ -168,7 +169,7 @@ run_model_psa_iter_all <- function(psa_row) {
   qdec_psa["F4_CC"]    <- psa_row$qdec_F4_CC
   qdec_psa["DCC"]      <- psa_row$qdec_DCC
   qdec_psa["HCC"]      <- psa_row$qdec_HCC
-  qdec_psa["LT"]       <- psa_row$qdec_F4_CC
+  qdec_psa["LT"]       <- psa_row$qdec_LT
   qdec_psa["Post_LT"]  <- psa_row$qdec_PostLT
 
   util_mat_psa <- build_util_matrix(v_util_age_base, qdec_psa)

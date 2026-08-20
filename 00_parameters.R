@@ -190,13 +190,22 @@ v_background_cost_cycle <- v_background_cost_annual * cycle_length
 age_vec <- c(12,25,35,45,55,65,75)
 
 util_age_base <- c(0.919,0.911,0.841,0.816,0.815,0.824,0.811)
+
+# Proportional disutilities: (healthy utility at the source study's mean age
+# - disease utility) / healthy utility at that age. Applied as a percentage
+# reduction of the CURRENT age-specific utility (not a flat point
+# subtraction), per O'Hara et al. 2020 / Chong et al. 2003 / Ratcliffe et al.
+# 2002. LT uses the "Tx Listing" value (transplant-event cycle); Post_LT uses
+# the "24mo post-tx and onward" steady-state value.
 qaly_dec_base <- c(
-  F0=0.016, F1=0.016, F2=0.016, F3=0.145, F4_CC=0.145,
-  HCC=0.165, DCC=0.155, LT=0.286,
-  Post_LT=0.036, Dead=1
+  F0=0.019607843, F1=0.019607843, F2=0.019607843,
+  F3=0.17791411, F4_CC=0.17791411,
+  HCC=0.202453988, DCC=0.190184049,
+  LT=0.350490196,
+  Post_LT=0.044117647, Dead=1
 )
 
-## Linear interpolation across ages 
+## Linear interpolation across ages
 v_util_age_base <- approx(age_vec, util_age_base, ages_states, rule=2)$y
 
 state_order_for_util <- c(
@@ -208,7 +217,7 @@ state_order_for_util <- c(
 build_util_matrix <- function(v_util_age, qdec){
   m <- sapply(state_order_for_util, function(st) {
     if (st=="Dead") rep(0,length(v_util_age))
-    else pmax(v_util_age - qdec[st], 0)
+    else pmax(v_util_age * (1 - qdec[st]), 0)
   })
   colnames(m) <- state_order_for_util
   m

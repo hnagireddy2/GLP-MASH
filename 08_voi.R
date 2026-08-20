@@ -104,8 +104,8 @@ v_names_params <- c(
   "h_F0_F1", "h_F1_F2", "h_F2_F3", "h_F3_F4", "h_F4_DCC",
   "h_F1_F0", "h_F2_F1", "h_F3_F2", "h_F4_F3",
   "h_DCC_Death", "h_HCC_Death", "h_LT_Death", "h_PostLT_Death",
-  "cost_F0_F2", "cost_F3", "cost_F4_CC", "cost_DCC", "cost_HCC",
-  "qdec_F0_F2", "qdec_F3", "qdec_F4_CC", "qdec_DCC", "qdec_HCC", "qdec_PostLT"
+  "cost_F0_F2", "cost_F3", "cost_F4_CC", "cost_DCC", "cost_HCC", "cost_LT",
+  "qdec_F0_F2", "qdec_F3", "qdec_F4_CC", "qdec_DCC", "qdec_HCC", "qdec_LT", "qdec_PostLT"
 )
 
 param_labels_voi <- c(
@@ -120,9 +120,11 @@ param_labels_voi <- c(
   h_LT_Death = "LT\u2192Death (yr 1)", h_PostLT_Death = "Post-LT\u2192Death",
   cost_F0_F2 = "Cost: F0\u2013F2", cost_F3 = "Cost: F3",
   cost_F4_CC = "Cost: F4/CC", cost_DCC = "Cost: DCC", cost_HCC = "Cost: HCC",
+  cost_LT = "Cost: LT",
   qdec_F0_F2 = "Util dec: F0\u2013F2", qdec_F3 = "Util dec: F3",
   qdec_F4_CC = "Util dec: F4/CC", qdec_DCC = "Util dec: DCC",
-  qdec_HCC = "Util dec: HCC", qdec_PostLT = "Util dec: Post-LT"
+  qdec_HCC = "Util dec: HCC", qdec_LT = "Util dec: LT",
+  qdec_PostLT = "Util dec: Post-LT"
 )
 
 # Use df_psa_input_all since this VOI is based on the all-strategy PSA
@@ -175,9 +177,9 @@ param_groups <- list(
   "Fibrosis Progression"   = c("h_F0_F1","h_F1_F2","h_F2_F3","h_F3_F4","h_F4_DCC"),
   "Fibrosis Regression"    = c("h_F1_F0","h_F2_F1","h_F3_F2","h_F4_F3"),
   "Mortality Hazards"      = c("h_DCC_Death","h_HCC_Death","h_LT_Death","h_PostLT_Death"),
-  "State Costs"            = c("cost_F0_F2","cost_F3","cost_F4_CC","cost_DCC","cost_HCC"),
+  "State Costs"            = c("cost_F0_F2","cost_F3","cost_F4_CC","cost_DCC","cost_HCC","cost_LT"),
   "Health State Utilities" = c("qdec_F0_F2","qdec_F3","qdec_F4_CC",
-                                "qdec_DCC","qdec_HCC","qdec_PostLT")
+                                "qdec_DCC","qdec_HCC","qdec_LT","qdec_PostLT")
 )
 
 cat("\n===== Computing EVPPI for parameter groups =====\n")
@@ -235,9 +237,9 @@ n0_defaults <- c(
   h_DCC_Death = 800, h_HCC_Death = 800,
   h_LT_Death = 500, h_PostLT_Death = 500,
   cost_F0_F2 = 300, cost_F3 = 300, cost_F4_CC = 300,
-  cost_DCC = 300, cost_HCC = 300,
+  cost_DCC = 300, cost_HCC = 300, cost_LT = 300,
   qdec_F0_F2 = 500, qdec_F3 = 500, qdec_F4_CC = 500,
-  qdec_DCC = 300, qdec_HCC = 300, qdec_PostLT = 200
+  qdec_DCC = 300, qdec_HCC = 300, qdec_LT = 300, qdec_PostLT = 200
 )
 
 v_n <- c(0, 10, 25, 50, 100, 200, 300, 500, 750, 1000, 1500, 2000, 3000, 5000)
