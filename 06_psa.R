@@ -34,6 +34,14 @@ generate_psa_params <- function(n_sim) {
     rbeta(n, p$shape1, p$shape2)
   }
 
+  ## Fibrosis-transition mean/low/high (annual), tied to whichever Le et al.
+  ## candidate set calibration selected (02_calibration.R's `best`), so PSA's
+  ## central estimate always matches the calibrated base case instead of
+  ## drifting from it.
+  fib_mean <- candidate_sets[[best]]
+  fib_low  <- candidate_sets[[paste0(best, "_low")]]
+  fib_high <- candidate_sets[[paste0(best, "_high")]]
+
   df <- data.frame(
 
     ## TREATMENT EFFECTS (log-normal, SEs from ESSENCE trial cell counts)
@@ -45,14 +53,14 @@ generate_psa_params <- function(n_sim) {
                               sdlog   = 0.2116),
 
     ## FIBROSIS TRANSITION HAZARDS (annual, gamma)
-    h_F0_F1 = rgamma_ci(n_sim, 0.100, 0.077, 0.132),
-    h_F1_F0 = rgamma_ci(n_sim, 0.025, 0.014, 0.046),
-    h_F1_F2 = rgamma_ci(n_sim, 0.097, 0.068, 0.137),
-    h_F2_F1 = rgamma_ci(n_sim, 0.049, 0.023, 0.105),
-    h_F2_F3 = rgamma_ci(n_sim, 0.075, 0.061, 0.092),
-    h_F3_F2 = rgamma_ci(n_sim, 0.080, 0.046, 0.138),
-    h_F3_F4 = rgamma_ci(n_sim, 0.045, 0.033, 0.060),
-    h_F4_F3 = rgamma_ci(n_sim, 0.047, 0.021, 0.108),
+    h_F0_F1 = rgamma_ci(n_sim, fib_mean["F0_F1"], fib_low["F0_F1"], fib_high["F0_F1"]),
+    h_F1_F0 = rgamma_ci(n_sim, fib_mean["F1_F0"], fib_low["F1_F0"], fib_high["F1_F0"]),
+    h_F1_F2 = rgamma_ci(n_sim, fib_mean["F1_F2"], fib_low["F1_F2"], fib_high["F1_F2"]),
+    h_F2_F1 = rgamma_ci(n_sim, fib_mean["F2_F1"], fib_low["F2_F1"], fib_high["F2_F1"]),
+    h_F2_F3 = rgamma_ci(n_sim, fib_mean["F2_F3"], fib_low["F2_F3"], fib_high["F2_F3"]),
+    h_F3_F2 = rgamma_ci(n_sim, fib_mean["F3_F2"], fib_low["F3_F2"], fib_high["F3_F2"]),
+    h_F3_F4 = rgamma_ci(n_sim, fib_mean["F3_F4"], fib_low["F3_F4"], fib_high["F3_F4"]),
+    h_F4_F3 = rgamma_ci(n_sim, fib_mean["F4_F3"], fib_low["F4_F3"], fib_high["F4_F3"]),
 
     ## Advanced-disease hazards (annual). Means = base case (nonfib_annual);
     ## ranges = 95% CI from Kim S1 SEs, or Kim's 20%-of-mean rule for the
