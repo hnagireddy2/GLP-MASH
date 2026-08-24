@@ -73,8 +73,13 @@ generate_psa_params <- function(n_sim) {
     h_DCC_Death    = rgamma_ci(n_sim, 0.20,   0.1216, 0.2784),
     h_HCC_LT       = rgamma_ci(n_sim, 0.0300, 0.0182, 0.0418),
     h_HCC_Death    = rgamma_ci(n_sim, 0.1305, 0.1049, 0.1561),
-    h_LT_Death     = rgamma_ci(n_sim, 0.0400, 0.0243, 0.0557),
-    h_PostLT_Death = rgamma_ci(n_sim, 0.0820, 0.0499, 0.1141),
+    ## LT_Death/PostLT_Death: derived from Bezinover et al. 2023 (see
+    ## nonfib_annual in 00_parameters.R for full source/methodology notes).
+    ## No reported CI exists for these derived values, so the +/-39.2%
+    ## relative width from the prior Rustgi-sourced estimates is carried
+    ## forward unchanged, now centered on the new means.
+    h_LT_Death     = rgamma_ci(n_sim, 0.0561, 0.0341, 0.0781),
+    h_PostLT_Death = rgamma_ci(n_sim, 0.0382, 0.0232, 0.0532),
 
     ## STATE COSTS (gamma) -- means/ranges from costs_base/costs_low/costs_high
     ## (00_parameters.R) so PSA always tracks the base-case cost inputs.
@@ -145,7 +150,10 @@ run_model_psa_iter_all <- function(psa_row) {
   p_cycle_psa$DCC_Death <- amh(psa_row$h_DCC_Death)
   p_cycle_psa$HCC_LT    <- amh(psa_row$h_HCC_LT)
   p_cycle_psa$HCC_Death <- amh(psa_row$h_HCC_Death)
-  p_cycle_psa$LT_Death  <- amh(psa_row$h_LT_Death)
+  # LT_Death is a one-time cumulative probability applied to LT's single
+  # cycle, not a recurring rate -- bypass amh()'s annual_to_month(), same as
+  # the base case (00_parameters.R).
+  p_cycle_psa$LT_Death  <- pmin(psa_row$h_LT_Death, 0.999)
   p_cycle_psa$PostLT_Death <- amh(psa_row$h_PostLT_Death)
   
   cost_vec_psa          <- costs_base

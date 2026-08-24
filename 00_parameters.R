@@ -249,8 +249,27 @@ nonfib_annual <- list(
   DCC_RegressF4 = 0.0,      # structural
   HCC_RegressF4 = 0.0,      # structural
   LT_to_PostLT  = 1.0,      # structural (deterministic) — LT is a single-cycle "transplant event/cost" state
-  LT_Death      = 0.0400,   # Rustgi 2022 Table 1, liver-related mortality only (LRM)
-  PostLT_Death  = 0.0820    # Rustgi 2022 Table 1, PLT row, liver-related mortality (LRM)
+  # LT_Death and PostLT_Death: derived from Bezinover D, Alkhouri N, Schumann R,
+  # Geyer N, Chinchilli V, Stine JG. "Liver Transplant Outcomes in Young Adults
+  # with Cirrhosis Related to Nonalcoholic Fatty Liver Disease." Transplant Proc.
+  # 2023;55(9):2134-2142. Fig 5A reports Kaplan-Meier patient survival for AYA
+  # (15-39yo) NASH/CC transplant recipients vs 40-65yo NASH/CC recipients;
+  # the paper does not tabulate numeric survival values, so S(1yr)=0.942 and
+  # S(3yr)=0.868 for the AYA-NASH/CC curve were APPROXIMATED by pixel-reading
+  # Fig 5A (calibrated against its axis tick marks), not read from an exact
+  # source table -- treat as approximate. All-cause KM survival was converted
+  # to disease-specific by netting out general-population background
+  # mortality (this model's own age_mort_background_costs.csv) at age 33.92,
+  # the paper's reported mean age at transplant for the AYA-NASH/CC group
+  # (Table 2). LT_Death = 1 - S(1yr), disease-specific -- applied directly,
+  # ONCE, to the single LT cycle (see p_prog_month below), on the assumption
+  # that most first-year post-transplant deaths cluster early. PostLT_Death
+  # = the constant annual hazard implied by S(3yr)/S(1yr) (years 2-3),
+  # extrapolated forward as the steady-state rate for all subsequent cycles.
+  # Supersedes the prior Rustgi 2022 Table 1 liver-related-mortality-only
+  # estimates (0.0400 / 0.0820).
+  LT_Death      = 0.0561,
+  PostLT_Death  = 0.0382
 )
 
 # Convert to monthly probabilities (except the deterministic post-LT ones)
@@ -273,7 +292,10 @@ p_prog_month <- list(
   DCC_RegressF4 = annual_to_month(nonfib_annual$DCC_RegressF4),
   HCC_RegressF4 = annual_to_month(nonfib_annual$HCC_RegressF4),
   LT_to_PostLT  = nonfib_annual$LT_to_PostLT,
-  LT_Death      = annual_to_month(nonfib_annual$LT_Death),
+  # LT_Death is a one-time cumulative probability (1 - 1yr survival), applied
+  # directly to LT's single cycle -- NOT annual_to_month()'d, since it isn't
+  # a recurring rate (LT is only ever occupied for one cycle).
+  LT_Death      = nonfib_annual$LT_Death,
   PostLT_Death  = annual_to_month(nonfib_annual$PostLT_Death)
 )
 

@@ -44,8 +44,6 @@ rows[["RR_progress"]] <- elasticity_row("Semaglutide RR: progression", RR_progre
 })
 
 ###### Fibrosis transitions + advanced-disease hazards (monthly probs) ######
-## Structural transitions (F4_LT, DCC_RegressF4, HCC_RegressF4 = 0;
-## LT_to_PostLT = 1) are skipped -- fixed by model design, not estimated.
 
 trans_names <- c("F0_F1", "F1_F0", "F1_F2", "F2_F1", "F2_F3", "F3_F2", "F3_F4", "F4_F3",
                  "F3_HCC", "F4_HCC", "F4_DCC", "DCC_HCC", "DCC_LT", "DCC_Death",
