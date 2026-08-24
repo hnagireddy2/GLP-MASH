@@ -73,12 +73,14 @@ generate_psa_params <- function(n_sim) {
     h_DCC_Death    = rgamma_ci(n_sim, 0.20,   0.1216, 0.2784),
     h_HCC_LT       = rgamma_ci(n_sim, 0.0300, 0.0182, 0.0418),
     h_HCC_Death    = rgamma_ci(n_sim, 0.1305, 0.1049, 0.1561),
-    ## LT_Death/PostLT_Death: derived from Bezinover et al. 2023 (see
-    ## nonfib_annual in 00_parameters.R for full source/methodology notes).
-    ## No reported CI exists for these derived values, so the +/-39.2%
-    ## relative width from the prior Rustgi-sourced estimates is carried
-    ## forward unchanged, now centered on the new means.
-    h_LT_Death     = rgamma_ci(n_sim, 0.0561, 0.0341, 0.0781),
+    ## LT_Death: Sharma et al. 2018 (UNOS, n=64,977) 90-day all-cause
+    ## mortality, background-netted. PostLT_Death: Bezinover et al. 2023,
+    ## NASH/CC-specific, years 1-3 (see nonfib_annual in 00_parameters.R for
+    ## full source/methodology notes on both). Neither source reports a CI
+    ## for these derived values, so the +/-39.2% relative width from the
+    ## prior Rustgi-sourced estimates is carried forward unchanged, now
+    ## centered on the new means.
+    h_LT_Death     = rgamma_ci(n_sim, 0.0157, 0.0095, 0.0218),
     h_PostLT_Death = rgamma_ci(n_sim, 0.0382, 0.0232, 0.0532),
 
     ## STATE COSTS (gamma) -- means/ranges from costs_base/costs_low/costs_high
