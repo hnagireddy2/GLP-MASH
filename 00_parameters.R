@@ -73,7 +73,9 @@ apply_rr_at_trial_timescale <- function(p_cycle_baseline, RR,
 ########### Load Mortality + Background Costs ##############
 ############################################################
 
-mort_cost_df <- read.csv("age_mort_background_costs.csv")
+# fileEncoding strips the UTF-8 BOM this file is saved with -- without it,
+# the first column reads in as "X...age" instead of "age".
+mort_cost_df <- read.csv("age_mort_background_costs.csv", fileEncoding = "UTF-8-BOM")
 
 #############################################################
 ######################## Model Specs ########################
@@ -167,9 +169,9 @@ ages_cycles <- age_start + (0:(n_cycles - 1)) * cycle_length   # length n_cycles
 ages_states <- age_start + (0:n_cycles)       * cycle_length   # length n_cycles + 1
 
 ## Overall background mortality (annual) -> monthly
-## prob_to_rate -> rate_to_prob 
-v_p_bg_annual <- approx(mort_cost_df$Age,
-                        mort_cost_df$overall_mortality_avg,
+## prob_to_rate -> rate_to_prob
+v_p_bg_annual <- approx(mort_cost_df$age,
+                        mort_cost_df$background_mortality_prob,
                         ages_cycles, rule=2)$y
 
 v_r_bg_annual <- prob_to_rate(v_p_bg_annual)               # hazard per year
@@ -177,9 +179,9 @@ v_p_bg_month  <- rate_to_prob(v_r_bg_annual, cycle_length) # monthly prob
 
 ## Background costs
 v_background_cost_annual <-
-  approx(mort_cost_df$Age,
-         mort_cost_df$background_cost_2025,
-         ages_cycles, rule = 2)$y   
+  approx(mort_cost_df$age,
+         mort_cost_df$mean_background_cost_2025,
+         ages_cycles, rule = 2)$y
 
 v_background_cost_cycle <- v_background_cost_annual * cycle_length
 
@@ -250,51 +252,13 @@ nonfib_annual <- list(
   HCC_RegressF4 = 0.0,      # structural
   LT_to_PostLT  = 1.0,      # structural (deterministic) — LT is a single-cycle "transplant event/cost" state
 
-  # LT_Death: acute/perioperative mortality for the single LT cycle. Sourced
-  # from Sharma M, et al. "Early mortality after liver transplantation:
-  # Defining the course and the cause." Surgery. 2018 -- a UNOS registry
-  # study (n=64,977, all etiologies) reporting 90-day all-cause mortality of
-  # 5.0%, with cause-of-death breakdown showing deaths in this window are
-  # dominated by surgical/vascular/perioperative causes (cardiovascular/
-  # cerebrovascular/pulmonary/hemorrhage = 53% of deaths within the first 7
-  # days alone), not liver-disease-specific causes. Used here (rather than
-  # NASH-specific data) on the rationale that acute surgical/technical risk
-  # is plausibly much less etiology-dependent than long-term chronic risk
-  # is -- unlike PostLT_Death below, where etiology clearly matters (see
-  # Bezinover et al., which found a significant survival difference between
-  # NASH/CC and other-metabolic-disease AYA recipients).
-  # 90-day cumulative probability -> annual-equivalent hazard -> one-cycle
-  # probability, then background mortality netted out (this model's own
-  # age_mort_background_costs.csv) at age 33.92 (see PostLT_Death note).
-  # Applied directly, ONCE, to the single LT cycle -- NOT annual_to_month()'d
-  # (see p_prog_month below), since it's a one-time probability over a fixed
-  # 90-day/one-cycle window, not a recurring annual rate.
-  # Superseded two earlier approaches, both rejected on clinical review:
-  # (1) attributing the full NASH-specific 1-year mortality to this one
-  # cycle (clinically implausible -- concentrates a full year of risk into
-  # one month), and (2) back-solving LT as the residual needed to make
-  # LT + 12 cycles of PostLT_Death reproduce the observed 1-year total
-  # (mathematically self-consistent but not an independent clinical
-  # estimate -- just a plug value).
+  # LT_Death: acute/perioperative mortality for the single LT cycle was sourced from 
+  # a UNOS registry study reporting 90-day all-cause mortality, with cause-of-death breakdown 
+  # showing deaths in this window dominated by surgical/vascular/perioperative causes, 
+  # not liver-disease-specific causes. 
   #
   # PostLT_Death: chronic/steady-state annual mortality for all cycles after
-  # LT. Sourced from Bezinover D, Alkhouri N, Schumann R, Geyer N,
-  # Chinchilli V, Stine JG. "Liver Transplant Outcomes in Young Adults with
-  # Cirrhosis Related to Nonalcoholic Fatty Liver Disease." Transplant Proc.
-  # 2023;55(9):2134-2142 -- chosen specifically because it's NASH/CC-specific
-  # (matches this model's disease) and age-matched (AYA 15-39yo, vs this
-  # model's adolescent-onset cohort). Fig 5A reports Kaplan-Meier patient
-  # survival for AYA NASH/CC vs 40-65yo NASH/CC recipients; the paper does
-  # not tabulate numeric survival values, so S(1yr)=0.942 and S(3yr)=0.868
-  # for the AYA-NASH/CC curve were APPROXIMATED by pixel-reading Fig 5A
-  # (calibrated against its own axis tick marks), not read from an exact
-  # source table -- treat as approximate. All-cause KM survival converted to
-  # disease-specific by netting out general-population background mortality
-  # at age 33.92, the paper's reported mean age at transplant for the
-  # AYA-NASH/CC group (Table 2). PostLT_Death = the constant annual hazard
-  # implied by S(3yr)/S(1yr) over years 2-3, extrapolated forward as the
-  # steady-state rate for all subsequent cycles (annual_to_month()'d
-  # normally below, since it's a genuinely recurring rate).
+  # LT. Sourced from Bezinover D, et al. (NASH/CC-specific and age-matched (ages 15-39). 
   #
   # Both supersede the prior Rustgi 2022 Table 1 liver-related-mortality-only
   # estimates (0.0400 / 0.0820).
@@ -416,8 +380,6 @@ rr_progress <- c(
 ##############################################################
 ########################### SCENARIOS ########################
 ##############################################################
-# Moved here from later in the Rmd so that base_treat_dur_cycles
-# is available when build_a_P uses it as a default argument.
 
 # Only one duration: 72 weeks (ESSENCE trial duration)
 treat_dur_72w_years <- 72/52   # ~1.385 years
