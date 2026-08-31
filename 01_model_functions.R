@@ -172,10 +172,13 @@ summarize_outcomes <- function(trace, drug_cost_per_year,
      v_cost_drug_cycle[on_vec == 1] <- total_drug_cost / sum(on_vec)
       }
 
-  # Background cost 
-  alive <- 1 - trace[, "Dead"]
+  # Background cost -- applies only to Post_LT. The F0-LT state costs
+  # (Tice 2023) already have general background healthcare baked into
+  # their estimates; Post_LT's own cost figure is deliberately
+  # immunosuppression-only (see costs_base in 00_parameters.R), so general
+  # background healthcare is added on top here instead.
   bg_cost_extended <- c(bg_cost_cycle[1], bg_cost_cycle)
-  v_bg_cost_cycle <- bg_cost_extended * alive
+  v_bg_cost_cycle <- bg_cost_extended * trace[, "Post_LT"]
 
   # Total cost
   v_cost_total <- v_cost_state_cycle + v_cost_drug_cycle + v_bg_cost_cycle

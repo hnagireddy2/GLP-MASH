@@ -1,7 +1,6 @@
 # 00_parameters.R  
 # All model inputs: libraries, helper functions, costs, utilities,
 # transition probabilities, treatment effects, scenarios.
-# No model execution happens here.
 
 rm(list = ls())
 
@@ -112,14 +111,23 @@ v_init <- c(F0 = 0,    F1 = 0,    F2 = 0.686, F3 = 0.314,
 # Source figures (2022 basis) inflated via MEPS PHC deflator (2022->2024)
 # then PCE (2024->2025), factor = 1.086235. See cost rebasing worksheet
 # for the full worked calculation and citations.
-# Post_LT cost basis still pending. LT is the transplant procedure cost
-# only (no separate complications add-on -- removed; procedure cost is
-# taken as already inclusive).
+# LT is the transplant procedure cost only (no separate complications
+# add-on -- removed; procedure cost is taken as already inclusive).
+# Post_LT = annual tacrolimus maintenance immunosuppression cost, from the
+# VA National Acquisition Center Contract Catalog Search Tool (FSS price,
+# consistent with the FSS basis used for the Semaglutide cost above):
+# https://www.vendorportal.ecms.va.gov/NAC/Pharma/Details?NDC=59746080001&CNT=36F79722D0012
+# Tacrolimus 5mg cap, NDC 59746-0800-01, $2.52/dose. Modeled at 10mg/day
+# (2 x 5mg cap) = $5.04/day x 365 = $1,839.60/yr (rounded to $1,840).
+# General background healthcare cost is already applied separately to
+# every alive cohort member (see summarize_outcomes() in
+# 01_model_functions.R), so this figure is deliberately immunosuppression-
+# only, not a bundled "total post-transplant care" cost.
 costs_base <- c(
   F0=7672, F1=7672, F2=7672, F3=9149, F4_CC=37231,
   DCC=172147, HCC=124919,
   LT=252739,
-  Post_LT=2344, Dead=0
+  Post_LT=1840, Dead=0
 )
 
 # Low/high bounds for the costs above (same 2025 rebasing factor applied
@@ -137,11 +145,11 @@ costs_high <- c(
 )
 
 ### Drug costs (annual)
-# cost_sema_base = NADAC Wegovy price, $1,302/mo x 12, Q1 2025 (already
+# cost_sema_base = FSS Wegovy price, $1,236/mo x 12, Q1 2025 (already
 # current-year, no deflation needed) -- NBER Working Paper No. 34949, Table 1.
 # Low/high bounds are a provisional carryover pending a sourced 2025 range.
 cost_lsm        <- 0
-cost_sema_base  <- 15624
+cost_sema_base  <- 14832
 cost_sema_low   <- 4188
 cost_sema_high  <- 16188
 
