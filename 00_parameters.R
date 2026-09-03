@@ -266,12 +266,22 @@ nonfib_annual <- list(
   # not liver-disease-specific causes. 
   #
   # PostLT_Death: chronic/steady-state annual mortality for all cycles after
-  # LT. Sourced from Bezinover D, et al. (NASH/CC-specific and age-matched (ages 15-39). 
+  # LT. Sourced from Bezinover D, et al. (NASH/CC-specific and age-matched (ages 15-39).
+  # S(1yr)=0.9495, S(3yr)=0.8718 for the AYA-NASH/CC curve, digitized from
+  # Fig 5A via WebPlotDigitizer (patient survival, not graft survival) and
+  # interpolated to exactly 365/1095 days. Background-netted at age 33.92
+  # (mean age at transplant, Table 2), same hazard formula as before.
+  #
+  # KNOWN LIMITATION: applied as one flat rate for all Post_LT cycles
+  # regardless of the patient's actual age at that point. Bezinover also
+  # reports a 40-65yo NASH/CC curve that would be more age-appropriate for
+  # patients well past the AYA band -- flagged for later review, not
+  # implemented (age-varying, not just a different constant).
   #
   # Both supersede the prior Rustgi 2022 Table 1 liver-related-mortality-only
   # estimates (0.0400 / 0.0820).
   LT_Death      = 0.0157,
-  PostLT_Death  = 0.0382
+  PostLT_Death  = 0.0399
 )
 
 # Convert to monthly probabilities (except the deterministic post-LT ones)
