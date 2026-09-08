@@ -267,10 +267,33 @@ nonfib_annual <- list(
   #
   # PostLT_Death: chronic/steady-state annual mortality for all cycles after
   # LT. Sourced from Bezinover D, et al. (NASH/CC-specific and age-matched (ages 15-39).
-  # S(1yr)=0.9495, S(3yr)=0.8718 for the AYA-NASH/CC curve, digitized from
-  # Fig 5A via WebPlotDigitizer (patient survival, not graft survival) and
-  # interpolated to exactly 365/1095 days. Background-netted at age 33.92
-  # (mean age at transplant, Table 2), same hazard formula as before.
+  # S(1yr)=0.9495, S(3yr)=0.8718, S(5yr)=0.8132 for the AYA-NASH/CC curve,
+  # digitized from Fig 5A via WebPlotDigitizer (patient survival, not graft
+  # survival) and interpolated to exactly 365/1095/1825 days.
+  #
+  # SHAPE: exponential (constant hazard). A Weibull fit to these 3 points
+  # gives a modestly declining hazard (shape=0.86), but its 95% CI on shape
+  # spans 1.0 (0.53-1.29) -- not statistically distinguishable from constant
+  # hazard with only 3 digitized points. Implementing a true declining
+  # hazard would also need duration-since-LT tracking (tunnel sub-states),
+  # since the Markov trace only tracks current state occupancy, not how
+  # long each cohort member has been in Post_LT -- same structural cost
+  # already avoided for the LT/Post_LT split itself. Not adopted; may be
+  # revisited if more curve points become available.
+  #
+  # FIT: lambda (annual hazard) estimated via weighted least squares of
+  # -ln(S(t)) ~ t through the origin, using all 3 points (not just yrs 1-3):
+  # lambda = sum(t_i * -ln(S_i)) / sum(t_i^2) = 0.04278/yr.
+  # 95% CI via delta method: Var(-ln(S_i)) ~= (SE(S_i)/S_i)^2, where
+  # SE(S_i) = sqrt(S_i*(1-S_i)/N_i) (binomial approx. on the interpolated
+  # number-at-risk N_i); Var(lambda) = sum(w_i^2 * Var(-ln(S_i))). Cross-
+  # checked against a 20,000-draw Monte Carlo (perturb each S_i by its SE,
+  # refit lambda per draw, take 2.5/97.5 percentiles) -- both methods agree
+  # closely: lambda 95% CI = (0.0337, 0.0519).
+  # Background-netted at age 33.92 (mean age at transplant, Table 2):
+  # lambda_disease = lambda_total - lambda_bg(33.92), then
+  # p_disease = 1 - exp(-lambda_disease). See 06_psa.R for the low/high
+  # values (0.0316 / 0.0491) used in PSA.
   #
   # KNOWN LIMITATION: applied as one flat rate for all Post_LT cycles
   # regardless of the patient's actual age at that point. Bezinover also
@@ -281,7 +304,7 @@ nonfib_annual <- list(
   # Both supersede the prior Rustgi 2022 Table 1 liver-related-mortality-only
   # estimates (0.0400 / 0.0820).
   LT_Death      = 0.0157,
-  PostLT_Death  = 0.0399
+  PostLT_Death  = 0.040365
 )
 
 # Convert to monthly probabilities (except the deterministic post-LT ones)

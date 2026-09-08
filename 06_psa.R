@@ -74,12 +74,14 @@ generate_psa_params <- function(n_sim) {
     h_HCC_LT       = rgamma_ci(n_sim, 0.0300, 0.0182, 0.0418),
     h_HCC_Death    = rgamma_ci(n_sim, 0.1305, 0.1049, 0.1561),
     ## LT_Death: Sharma et al. 2018 (UNOS, n=64,977) 90-day all-cause
-    ## mortality, background-netted. PostLT_Death: Bezinover et al. 2023,
-    ## NASH/CC-specific AYA (15-39yo) curve, years 1-3 (see nonfib_annual in
-    ## 00_parameters.R for full source/methodology notes on both). Neither
-    ## source reports a CI for these derived values, so the +/-39.2%
-    ## relative width from the prior Rustgi-sourced estimates is carried
-    ## forward unchanged, now centered on the new means.
+    ## mortality, background-netted. Source reports no CI, so the +/-39.2%
+    ## relative width from the prior Rustgi-sourced estimate is carried
+    ## forward, centered on the new mean.
+    ## PostLT_Death: Bezinover et al. 2023, NASH/CC-specific AYA (15-39yo)
+    ## curve, exponential fit to all 3 digitized points (years 1/3/5), with
+    ## a proper binomial-SE-based 95% CI on the fitted annual hazard --
+    ## see nonfib_annual$PostLT_Death in 00_parameters.R for the full
+    ## derivation (lambda, delta-method CI, background-netting).
     ## NOTE: PostLT_Death uses the AYA-specific curve as a single flat rate
     ## for all Post_LT cycles, regardless of the patient's actual age at
     ## that point -- Bezinover also reports a 40-65yo curve that would be
@@ -88,7 +90,7 @@ generate_psa_params <- function(n_sim) {
     ## just a different constant -- see build_a_P()'s per-cycle background
     ## mortality lookup for the analogous mechanism).
     h_LT_Death     = rgamma_ci(n_sim, 0.0157, 0.0095, 0.0218),
-    h_PostLT_Death = rgamma_ci(n_sim, 0.0399, 0.0243, 0.0555),
+    h_PostLT_Death = rgamma_ci(n_sim, 0.040365, 0.031592, 0.049058),
 
     ## STATE COSTS (gamma) -- means/ranges from costs_base/costs_low/costs_high
     ## (00_parameters.R) so PSA always tracks the base-case cost inputs.
