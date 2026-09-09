@@ -34,6 +34,80 @@ generate_psa_params <- function(n_sim) {
     rbeta(n, p$shape1, p$shape2)
   }
 
+  ## Rank-order-preserving correlated sampling, per Goldhaber-Fiebert JD,
+  ## Jalal H. "Some Health States Are Better Than Others: Using Health
+  ## State Rank Order to Improve Probabilistic Analyses." Med Decis Making.
+  ## 2016;36(8):927-940.
+  ##
+  ## PROBLEM: F3 < F4_CC < HCC < DCC must hold in every PSA draw, but each
+  ## state's cost also has its own literature-sourced marginal distribution
+  ## (gamma, from costs_base/costs_low/costs_high) that should be preserved.
+  ## Simply sorting 4 independent draws (the old approach) guarantees the
+  ## ordering but destroys each state's marginal: the value assigned to F3
+  ## becomes the MIN of 4 independent draws (not a draw from F3's own
+  ## gamma distribution), DCC's becomes the MAX, etc. -- exactly the
+  ## distortion the paper's abstract flags as a tradeoff of naive
+  ## rank-preserving methods.
+  ##
+  ## METHOD (Iman-Conover-style rank matching against a correlated
+  ## multivariate-normal reference, as used in the paper's algorithm):
+  ## 1. Keep each column's own independently-drawn values untouched as a
+  ##    SET -- only which row they land in changes. This guarantees each
+  ##    column's marginal distribution is exactly its own gamma(mean, CI),
+  ##    unlike sorting, which mixes values across states.
+  ## 2. Generate a reference matrix of correlated standard normals with a
+  ##    target correlation rho between every pair of columns (an
+  ##    "equicorrelation" matrix: 1 on the diagonal, rho elsewhere). This
+  ##    is a simplification of the paper's general pairwise preference
+  ##    matrix (which needs per-pair correlations plus an eigenvalue fix
+  ##    for non-positive-definite cases) -- valid here because our 4 cost
+  ##    states form a single TOTAL order (every pair is ordered), so one
+  ##    shared rho for all pairs is sufficient and always positive
+  ##    definite for rho in (-1/3, 1) at k=4.
+  ## 3. For each column, re-sort that column's own values into the row
+  ##    positions given by the rank of that column's reference-normal
+  ##    values. Columns that share a highly-correlated reference are
+  ##    therefore very likely to be simultaneously low or simultaneously
+  ##    high in the same row -- without ever mixing one state's values
+  ##    into another's.
+  ## 4. Search for the SMALLEST rho (starting near 1 and stepping down)
+  ##    that keeps the fraction of ordering violations below a small
+  ##    tolerance -- per the paper: "start with near-perfect correlation
+  ##    ... iteratively decrement ... until violations reach the tolerance
+  ##    threshold." Using the smallest sufficient rho, rather than always
+  ##    forcing rho=1, avoids over-correlating the states beyond what's
+  ##    needed to satisfy the ordering constraint.
+  induce_rank_order <- function(U, tol = 0.001, rho_step = 0.01) {
+    n <- nrow(U); k <- ncol(U)
+    U_best <- NULL
+
+    for (rho in seq(1 - rho_step, 0, by = -rho_step)) {
+      Sigma <- matrix(rho, k, k); diag(Sigma) <- 1
+      chol_Sigma <- chol(Sigma)                  # Sigma = t(chol_Sigma) %*% chol_Sigma
+      Z <- matrix(rnorm(n * k), n, k)
+      Y <- Z %*% chol_Sigma                      # correlated reference normals
+
+      U_try <- U
+      for (j in 1:k) {
+        U_try[order(Y[, j]), j] <- sort(U[, j])  # re-pair rows; column j's own
+      }                                          # values are untouched as a set
+
+      viol <- mean(apply(U_try, 1, is.unsorted))
+      if (viol <= tol) {
+        U_best <- U_try                          # accept, then try a lower rho
+      } else {
+        break                                    # tolerance no longer met; stop
+      }
+    }
+
+    if (is.null(U_best)) {
+      warning("induce_rank_order(): could not reach violation tolerance ",
+              "even near rho=1; using the least-violating attempt.")
+      U_best <- U_try
+    }
+    U_best
+  }
+
   ## Fibrosis-transition mean/low/high (annual), tied to whichever Le et al.
   ## candidate set calibration selected (02_calibration.R's `best`), so PSA's
   ## central estimate always matches the calibrated base case instead of
@@ -96,7 +170,10 @@ generate_psa_params <- function(n_sim) {
     ## (00_parameters.R) so PSA always tracks the base-case cost inputs.
     cost_F0_F2 = rgamma_ci(n_sim, costs_base["F0"], costs_low["F0"], costs_high["F0"]),
 
-    ## STATE COSTS (gamma) — drawn then rank-ordered to enforce F3 < F4_CC < HCC < DCC
+    ## STATE COSTS (gamma) -- independent draws from each state's own
+    ## literature-sourced marginal. Rank order (F3 < F4_CC < HCC < DCC) is
+    ## induced afterward via induce_rank_order() -- see below -- rather
+    ## than by sorting these draws directly.
     cost_F3_raw    = rgamma_ci(n_sim, costs_base["F3"],    costs_low["F3"],    costs_high["F3"]),
     cost_F4_CC_raw = rgamma_ci(n_sim, costs_base["F4_CC"], costs_low["F4_CC"], costs_high["F4_CC"]),
     cost_HCC_raw   = rgamma_ci(n_sim, costs_base["HCC"],   costs_low["HCC"],   costs_high["HCC"]),
@@ -116,9 +193,11 @@ generate_psa_params <- function(n_sim) {
     qdec_PostLT = rbeta_se(n_sim, qaly_dec_base["Post_LT"], qaly_dec_base["Post_LT"] * 0.10)
 
   )
-# Enforce rank order: F3 < F4_CC < HCC < DCC
-  cost_ordered <- t(apply(cbind(df$cost_F3_raw, df$cost_F4_CC_raw,
-                                df$cost_HCC_raw, df$cost_DCC_raw), 1, sort))
+# Induce rank order (F3 < F4_CC < HCC < DCC) via correlated resampling
+  # (see induce_rank_order() above) instead of sorting -- preserves each
+  # state's own marginal cost distribution exactly.
+  cost_ordered <- induce_rank_order(cbind(df$cost_F3_raw, df$cost_F4_CC_raw,
+                                          df$cost_HCC_raw, df$cost_DCC_raw))
   df$cost_F3    <- cost_ordered[, 1]
   df$cost_F4_CC <- cost_ordered[, 2]
   df$cost_HCC   <- cost_ordered[, 3]
