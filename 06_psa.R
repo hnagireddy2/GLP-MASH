@@ -49,63 +49,99 @@ generate_psa_params <- function(n_sim) {
   ## distortion the paper's abstract flags as a tradeoff of naive
   ## rank-preserving methods.
   ##
-  ## METHOD (Iman-Conover-style rank matching against a correlated
-  ## multivariate-normal reference, as used in the paper's algorithm):
-  ## 1. Keep each column's own independently-drawn values untouched as a
-  ##    SET -- only which row they land in changes. This guarantees each
-  ##    column's marginal distribution is exactly its own gamma(mean, CI),
-  ##    unlike sorting, which mixes values across states.
-  ## 2. Generate a reference matrix of correlated standard normals with a
-  ##    target correlation rho between every pair of columns (an
-  ##    "equicorrelation" matrix: 1 on the diagonal, rho elsewhere). This
-  ##    is a simplification of the paper's general pairwise preference
-  ##    matrix (which needs per-pair correlations plus an eigenvalue fix
-  ##    for non-positive-definite cases) -- valid here because our 4 cost
-  ##    states form a single TOTAL order (every pair is ordered), so one
-  ##    shared rho for all pairs is sufficient and always positive
-  ##    definite for rho in (-1/3, 1) at k=4.
-  ## 3. For each column, re-sort that column's own values into the row
-  ##    positions given by the rank of that column's reference-normal
-  ##    values. Columns that share a highly-correlated reference are
-  ##    therefore very likely to be simultaneously low or simultaneously
-  ##    high in the same row -- without ever mixing one state's values
-  ##    into another's.
-  ## 4. Search for the SMALLEST rho (starting near 1 and stepping down)
-  ##    that keeps the fraction of ordering violations below a small
-  ##    tolerance -- per the paper: "start with near-perfect correlation
-  ##    ... iteratively decrement ... until violations reach the tolerance
-  ##    threshold." Using the smallest sufficient rho, rather than always
-  ##    forcing rho=1, avoids over-correlating the states beyond what's
-  ##    needed to satisfy the ordering constraint.
-  induce_rank_order <- function(U, tol = 0.001, rho_step = 0.01) {
+  ## METHOD (per-pair correlation matrix + eigenvalue correction + rank
+  ## matching, following the paper's general algorithm):
+  ## 1. For EACH of the 6 pairs among the 4 states independently, find the
+  ##    smallest sufficient correlation (search from near 1 downward) that
+  ##    keeps THAT PAIR's own violation rate below tolerance, using only
+  ##    those two columns. States whose distributions are already far
+  ##    apart (e.g. F3 ~$9k vs DCC ~$172k) typically need rho=0; only
+  ##    genuinely close pairs (e.g. HCC ~$125k vs DCC ~$172k) need real
+  ##    correlation. This avoids over-correlating pairs that don't need it
+  ##    -- the failure mode of using one shared correlation for all pairs.
+  ## 2. Assemble these 6 pairwise values into a single 4x4 matrix. Because
+  ##    each was optimized independently, the assembled matrix isn't
+  ##    guaranteed to be a valid (positive-semi-definite) correlation
+  ##    matrix. Fix this via eigenvalue decomposition: clip any negative
+  ##    eigenvalues up to a small positive floor, reconstruct, and
+  ##    rescale to unit diagonal -- the nearest valid correlation matrix
+  ##    to the pairwise-optimal one.
+  ## 3. Generate ONE joint multivariate-normal reference from this final
+  ##    matrix (not pairwise), then re-sort each column's own values into
+  ##    the row positions given by that column's reference rank (Iman-
+  ##    Conover rank matching) -- exactly as before, so marginals are
+  ##    still preserved exactly.
+  ## 4. Check the REALIZED violation rate across the full row. Note this
+  ##    is NOT a separate check needed for non-adjacent pairs (e.g. F3 vs
+  ##    HCC): if F3<F4_CC, F4_CC<HCC, and HCC<DCC all hold for a given
+  ##    row's actual values, F3<HCC etc. hold automatically by
+  ##    transitivity of real-number ordering -- no realized draw can
+  ##    satisfy every adjacent comparison while failing a non-adjacent
+  ##    one. The re-check IS still necessary for a different reason: step
+  ##    2's eigenvalue correction can shrink the pairwise-optimal
+  ##    correlations, and Iman-Conover only approximately induces the
+  ##    target matrix in finite samples -- so the realized rate can drift
+  ##    above tolerance even when every pairwise target was individually
+  ##    sufficient. If it does, uniformly inflate the raw matrix's
+  ##    off-diagonal entries and retry.
+  induce_rank_order <- function(U, tol = 0.001, rho_step = 0.01,
+                                max_inflate = 0.4, inflate_step = 0.05) {
     n <- nrow(U); k <- ncol(U)
-    U_best <- NULL
 
-    for (rho in seq(1 - rho_step, 0, by = -rho_step)) {
-      Sigma <- matrix(rho, k, k); diag(Sigma) <- 1
-      chol_Sigma <- chol(Sigma)                  # Sigma = t(chol_Sigma) %*% chol_Sigma
-      Z <- matrix(rnorm(n * k), n, k)
-      Y <- Z %*% chol_Sigma                      # correlated reference normals
-
-      U_try <- U
-      for (j in 1:k) {
-        U_try[order(Y[, j]), j] <- sort(U[, j])  # re-pair rows; column j's own
-      }                                          # values are untouched as a set
-
-      viol <- mean(apply(U_try, 1, is.unsorted))
-      if (viol <= tol) {
-        U_best <- U_try                          # accept, then try a lower rho
-      } else {
-        break                                    # tolerance no longer met; stop
+    ## Step 1: minimum sufficient correlation for each pair, independently
+    pair_rho <- function(i, j) {
+      best <- 0
+      for (rho in seq(1 - rho_step, 0, by = -rho_step)) {
+        L <- chol(matrix(c(1, rho, rho, 1), 2, 2))
+        Y <- matrix(rnorm(n * 2), n, 2) %*% L
+        ui <- U[, i]; uj <- U[, j]
+        ui[order(Y[, 1])] <- sort(U[, i])
+        uj[order(Y[, 2])] <- sort(U[, j])
+        if (mean(ui >= uj) <= tol) best <- rho else break
       }
+      best
     }
 
-    if (is.null(U_best)) {
-      warning("induce_rank_order(): could not reach violation tolerance ",
-              "even near rho=1; using the least-violating attempt.")
-      U_best <- U_try
+    Sigma_raw <- diag(k)
+    for (i in 1:(k - 1)) for (j in (i + 1):k) {
+      Sigma_raw[i, j] <- Sigma_raw[j, i] <- pair_rho(i, j)
     }
-    U_best
+
+    ## Steps 2-3: nearest valid correlation matrix, then joint sampling
+    adjust_and_sample <- function(Sigma) {
+      eig        <- eigen(Sigma, symmetric = TRUE)
+      vals_fixed <- pmax(eig$values, 1e-8)             # clip negative eigenvalues
+      Sigma_psd  <- eig$vectors %*% diag(vals_fixed) %*% t(eig$vectors)
+      d          <- sqrt(diag(Sigma_psd))
+      Sigma_adj  <- Sigma_psd / outer(d, d); diag(Sigma_adj) <- 1
+
+      Y <- matrix(rnorm(n * k), n, k) %*% chol(Sigma_adj)
+      U_out <- U
+      for (j in 1:k) U_out[order(Y[, j]), j] <- sort(U[, j])
+      U_out
+    }
+
+    U_out <- adjust_and_sample(Sigma_raw)
+    viol  <- mean(apply(U_out, 1, is.unsorted))
+
+    ## Step 4: realized-violation safety net (see comment above -- this
+    ## guards against eigenvalue-correction/finite-sample drift, not
+    ## against non-adjacent pairs, which can't fail once adjacency holds)
+    inflate <- 0
+    while (viol > tol && inflate < max_inflate) {
+      inflate <- inflate + inflate_step
+      Sigma_try <- Sigma_raw
+      Sigma_try[upper.tri(Sigma_try)] <- pmin(Sigma_raw[upper.tri(Sigma_raw)] + inflate, 0.999)
+      Sigma_try[lower.tri(Sigma_try)] <- t(Sigma_try)[lower.tri(Sigma_try)]
+      U_out <- adjust_and_sample(Sigma_try)
+      viol  <- mean(apply(U_out, 1, is.unsorted))
+    }
+
+    if (viol > tol) {
+      warning("induce_rank_order(): violation rate ", round(viol, 4),
+              " still above tolerance after inflation retries.")
+    }
+    U_out
   }
 
   ## Fibrosis-transition mean/low/high (annual), tied to whichever Le et al.
