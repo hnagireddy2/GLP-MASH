@@ -79,8 +79,6 @@ wtp_threshold    <- 150000
 
 calculate_ce_out_mash <- function(l_params, n_wtp = wtp_threshold) {
 
-  # Override global discount vectors for this scenario; on.exit guarantees
-  # they're restored even if something below errors out
   v_dwc_saved <- v_dwc
   v_dwu_saved <- v_dwu
   on.exit({

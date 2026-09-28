@@ -9,7 +9,7 @@
 txtsize <- 13
 v_wtp <- seq(0, 600000, by = 10000)
 
-# Rename columns for readable facet labels
+# Rename columns 
 param_display_names <- c(
   rr_sema_regress  = "Sema RR: Regression",
   rr_sema_progress = "Sema RR: Progression",
@@ -121,7 +121,6 @@ okabe_ito_9 <- c(
 )
 names(okabe_ito_9) <- all_strat_labels
 
-# l_psa_all already built above; reused here for the CEAC/ELC/frontier plots
 v_wtp_all <- seq(0, 600000, by = 10000)
 
 # ── 2. Post-PSA Cost-Effectiveness Plane (mean estimates) ───
@@ -132,7 +131,6 @@ df_psa_all_means <- data.frame(
 ) %>%
   arrange(QALY)
 
-# Define df_frontier_all FIRST so mutate() can reference it
 df_frontier_all <- calculate_icers(
   cost       = df_psa_all_means$Cost,
   effect     = df_psa_all_means$QALY,
@@ -192,7 +190,6 @@ ggplot(df_psa_all_means, aes(x = QALY, y = Cost,
         panel.grid.major = element_line(color = "grey90"),
         panel.grid.minor = element_blank())
 
-# Print full ICER table
 print(df_frontier_all)
 
 # ── 3. CEAC — All Strategies ──────────────────────────────────
@@ -234,13 +231,11 @@ plot(elc_all) +
 #############################################################
 # Requires df_c_all, df_e_all from 06_psa.R (one row per PSA draw)
 
-# ---- 0. Exact strategy labels (must match df_c_all column names) ----
-s_trt <- "Sema 72w (Age 12)"   # exact match to df_c_all column name
+# ---- 0. Exact strategy labels ----
+s_trt <- "Sema 72w (Age 12)"   
 s_ref <- "LSM"
 
 # ---- 1. Per-draw incrementals = parameter-uncertainty cloud ----
-#    NO /sqrt(N): we want the spread of the posterior predictive,
-#    not Monte Carlo error of the mean.
 d_cost <- df_c_all[[s_trt]] - df_c_all[[s_ref]]
 d_qaly <- df_e_all[[s_trt]] - df_e_all[[s_ref]]
 
@@ -249,7 +244,7 @@ if (any(!ok)) cat(sprintf("Dropped %d of %d draws with NA/Inf\n", sum(!ok), leng
 d_cost <- d_cost[ok]
 d_qaly <- d_qaly[ok]
 
-# ---- 2. Point ICER (matches calculate_icers: ratio of means) ----
+# ---- 2. Point ICER  ----
 icer_point <- mean(d_cost) / mean(d_qaly)
 
 # ---- 3. Diagnostic: fraction of draws with ΔQALY <= 0 ----
@@ -262,7 +257,7 @@ icer_draws <- d_cost / d_qaly
 icer_ui    <- quantile(icer_draws, c(.025, .975), na.rm = TRUE)
 
 # ---- 5. INMB-based interval + P(cost-effective) at thresholds ----
-wtp_vec <- c(50000, 100000, 116000, 150000)   # set to your thresholds
+wtp_vec <- c(50000, 100000, 116000, 150000)   # set to thresholds
 inmb_tbl <- do.call(rbind, lapply(wtp_vec, function(w) {
   inmb <- w * d_qaly - d_cost                  # linear -> well-behaved
   data.frame(
@@ -288,7 +283,7 @@ fieller_ci <- function(dc, de, level = .95) {
   cc  <- mc^2 - z^2 * v11
   disc <- b^2 - 4 * a * cc
   
-  # isTRUE guards against any residual NA in the condition
+  # guard against any residual NA in the condition
   if (!is.finite(a) || !is.finite(disc) || isTRUE(a <= 0) || isTRUE(disc < 0))
     return(c(lower = NA, upper = NA))
   sort((-b + c(-1, 1) * sqrt(disc)) / (2 * a))

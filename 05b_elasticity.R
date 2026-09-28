@@ -2,18 +2,8 @@
 # Requires: source("00_parameters.R"), source("00b_le_transitions.R"),
 #           source("01_model_functions.R"), source("02_calibration.R")
 #
-# Elasticity check: nudge each parameter +/-25% one at a time (all else
-# held at base case), report the resulting ICER and an elasticity score.
-#
-# Unlike OWSA (05_owsa.R), which sweeps each parameter over its own
-# literature-derived CI, every parameter here gets the SAME relative
-# nudge. That isolates how sensitive the model's ICER is to each input
-# structurally, independent of how uncertain that input actually is --
-# useful for deciding which parameters are worth a closer OWSA/PSA look.
-#
 # Elasticity = (% change in ICER from -25% to +25%) / (% change in the
-# parameter, i.e. 50%). Larger |elasticity| = ICER moves more for a given
-# relative change in that parameter.
+# parameter, i.e. 50%). 
 
 pct_shift   <- 0.25
 base_icer_v <- run_owsa_icer()
@@ -58,8 +48,6 @@ for (nm in trans_names) {
 }
 
 ###### Costs ######
-## F0/F1/F2 share one literature-sourced cost estimate, so they're nudged
-## together as a single parameter rather than three identical rows.
 
 cost_groups <- list(F0_F2 = c("F0", "F1", "F2"), F3 = "F3", F4_CC = "F4_CC",
                     DCC = "DCC", HCC = "HCC", LT = "LT", Post_LT = "Post_LT")

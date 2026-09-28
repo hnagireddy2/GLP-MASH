@@ -72,8 +72,6 @@ apply_rr_at_trial_timescale <- function(p_cycle_baseline, RR,
 ########### Load Mortality + Background Costs ##############
 ############################################################
 
-# fileEncoding strips the UTF-8 BOM this file is saved with -- without it,
-# the first column reads in as "X...age" instead of "age".
 mort_cost_df <- read.csv("age_mort_background_costs.csv", fileEncoding = "UTF-8-BOM")
 
 #############################################################
@@ -108,21 +106,6 @@ v_init <- c(F0 = 0,    F1 = 0,    F2 = 0.686, F3 = 0.314,
 #############################################################
 
 # Annual state costs, rebased to 2025 USD.
-# Source figures (2022 basis) inflated via MEPS PHC deflator (2022->2024)
-# then PCE (2024->2025), factor = 1.086235. See cost rebasing worksheet
-# for the full worked calculation and citations.
-# LT is the transplant procedure cost only (no separate complications
-# add-on -- removed; procedure cost is taken as already inclusive).
-# Post_LT = annual tacrolimus maintenance immunosuppression cost, from the
-# VA National Acquisition Center Contract Catalog Search Tool (FSS price,
-# consistent with the FSS basis used for the Semaglutide cost above):
-# https://www.vendorportal.ecms.va.gov/NAC/Pharma/Details?NDC=59746080001&CNT=36F79722D0012
-# Tacrolimus 5mg cap, NDC 59746-0800-01, $2.52/dose. Modeled at 10mg/day
-# (2 x 5mg cap) = $5.04/day x 365 = $1,839.60/yr (rounded to $1,840).
-# General background healthcare cost is already applied separately to
-# every alive cohort member (see summarize_outcomes() in
-# 01_model_functions.R), so this figure is deliberately immunosuppression-
-# only, not a bundled "total post-transplant care" cost.
 costs_base <- c(
   F0=7672, F1=7672, F2=7672, F3=9149, F4_CC=37231,
   DCC=172147, HCC=124919,
@@ -130,9 +113,7 @@ costs_base <- c(
   Post_LT=1840, Dead=0
 )
 
-# Low/high bounds for the costs above (same 2025 rebasing factor applied
-# to the original 2022 low/high figures). PSA recovers each cost's SE
-# from these via se_from_ci95() -- see 06_psa.R.
+# Low/high bounds 
 costs_low <- c(
   F0=6137, F1=6137, F2=6137, F3=7319, F4_CC=29785,
   DCC=137717, HCC=99935,
@@ -145,9 +126,6 @@ costs_high <- c(
 )
 
 ### Drug costs (annual)
-# cost_sema_base = FSS Wegovy price, $1,236/mo x 12, Q1 2025 (already
-# current-year, no deflation needed) -- NBER Working Paper No. 34949, Table 1.
-# Low/high bounds are a provisional carryover pending a sourced 2025 range.
 cost_lsm        <- 0
 cost_sema_base  <- 14832
 cost_sema_low   <- 4188
@@ -202,11 +180,7 @@ age_vec <- c(12,25,35,45,55,65,75)
 util_age_base <- c(0.919,0.911,0.841,0.816,0.815,0.824,0.811)
 
 # Proportional disutilities: (healthy utility at the source study's mean age
-# - disease utility) / healthy utility at that age. Applied as a percentage
-# reduction of the CURRENT age-specific utility (not a flat point
-# subtraction), per O'Hara et al. 2020 / Chong et al. 2003 / Ratcliffe et al.
-# 2002. LT uses the "Tx Listing" value (transplant-event cycle); Post_LT uses
-# the "24mo post-tx and onward" steady-state value.
+# - disease utility) / healthy utility at that age
 qaly_dec_base <- c(
   F0=0.019607843, F1=0.019607843, F2=0.019607843,
   F3=0.17791411, F4_CC=0.17791411,
@@ -259,50 +233,6 @@ nonfib_annual <- list(
   DCC_RegressF4 = 0.0,      # structural
   HCC_RegressF4 = 0.0,      # structural
   LT_to_PostLT  = 1.0,      # structural (deterministic) — LT is a single-cycle "transplant event/cost" state
-
-  # LT_Death: acute/perioperative mortality for the single LT cycle was sourced from 
-  # a UNOS registry study reporting 90-day all-cause mortality, with cause-of-death breakdown 
-  # showing deaths in this window dominated by surgical/vascular/perioperative causes, 
-  # not liver-disease-specific causes. 
-  #
-  # PostLT_Death: chronic/steady-state annual mortality for all cycles after
-  # LT. Sourced from Bezinover D, et al. (NASH/CC-specific and age-matched (ages 15-39).
-  # S(1yr)=0.9495, S(3yr)=0.8718, S(5yr)=0.8132 for the AYA-NASH/CC curve,
-  # digitized from Fig 5A via WebPlotDigitizer (patient survival, not graft
-  # survival) and interpolated to exactly 365/1095/1825 days.
-  #
-  # SHAPE: exponential (constant hazard). A Weibull fit to these 3 points
-  # gives a modestly declining hazard (shape=0.86), but its 95% CI on shape
-  # spans 1.0 (0.53-1.29) -- not statistically distinguishable from constant
-  # hazard with only 3 digitized points. Implementing a true declining
-  # hazard would also need duration-since-LT tracking (tunnel sub-states),
-  # since the Markov trace only tracks current state occupancy, not how
-  # long each cohort member has been in Post_LT -- same structural cost
-  # already avoided for the LT/Post_LT split itself. Not adopted; may be
-  # revisited if more curve points become available.
-  #
-  # FIT: lambda (annual hazard) estimated via weighted least squares of
-  # -ln(S(t)) ~ t through the origin, using all 3 points (not just yrs 1-3):
-  # lambda = sum(t_i * -ln(S_i)) / sum(t_i^2) = 0.04278/yr.
-  # 95% CI via delta method: Var(-ln(S_i)) ~= (SE(S_i)/S_i)^2, where
-  # SE(S_i) = sqrt(S_i*(1-S_i)/N_i) (binomial approx. on the interpolated
-  # number-at-risk N_i); Var(lambda) = sum(w_i^2 * Var(-ln(S_i))). Cross-
-  # checked against a 20,000-draw Monte Carlo (perturb each S_i by its SE,
-  # refit lambda per draw, take 2.5/97.5 percentiles) -- both methods agree
-  # closely: lambda 95% CI = (0.0337, 0.0519).
-  # Background-netted at age 33.92 (mean age at transplant, Table 2):
-  # lambda_disease = lambda_total - lambda_bg(33.92), then
-  # p_disease = 1 - exp(-lambda_disease). See 06_psa.R for the low/high
-  # values (0.0316 / 0.0491) used in PSA.
-  #
-  # KNOWN LIMITATION: applied as one flat rate for all Post_LT cycles
-  # regardless of the patient's actual age at that point. Bezinover also
-  # reports a 40-65yo NASH/CC curve that would be more age-appropriate for
-  # patients well past the AYA band -- flagged for later review, not
-  # implemented (age-varying, not just a different constant).
-  #
-  # Both supersede the prior Rustgi 2022 Table 1 liver-related-mortality-only
-  # estimates (0.0400 / 0.0820).
   LT_Death      = 0.0157,
   PostLT_Death  = 0.040365
 )
@@ -327,9 +257,7 @@ p_prog_month <- list(
   DCC_RegressF4 = annual_to_month(nonfib_annual$DCC_RegressF4),
   HCC_RegressF4 = annual_to_month(nonfib_annual$HCC_RegressF4),
   LT_to_PostLT  = nonfib_annual$LT_to_PostLT,
-  # LT_Death is a one-time cumulative probability (1 - 1yr survival), applied
-  # directly to LT's single cycle -- NOT annual_to_month()'d, since it isn't
-  # a recurring rate (LT is only ever occupied for one cycle).
+  # LT_Death is a one-time cumulative probability (1 - 1yr survival)
   LT_Death      = nonfib_annual$LT_Death,
   PostLT_Death  = annual_to_month(nonfib_annual$PostLT_Death)
 )

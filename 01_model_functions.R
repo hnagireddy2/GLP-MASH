@@ -172,11 +172,7 @@ summarize_outcomes <- function(trace, drug_cost_per_year,
      v_cost_drug_cycle[on_vec == 1] <- total_drug_cost / sum(on_vec)
       }
 
-  # Background cost -- applies only to Post_LT. The F0-LT state costs
-  # (Tice 2023) already have general background healthcare baked into
-  # their estimates; Post_LT's own cost figure is deliberately
-  # immunosuppression-only (see costs_base in 00_parameters.R), so general
-  # background healthcare is added on top here instead.
+  # Background cost -- applies only to Post_LT
   bg_cost_extended <- c(bg_cost_cycle[1], bg_cost_cycle)
   v_bg_cost_cycle <- bg_cost_extended * trace[, "Post_LT"]
 
@@ -300,11 +296,6 @@ run_strategy <- function(treat_start, label) {
 #############################################################
 ######### run_three_strategies: LSM / Age12 / Age18 #########
 #############################################################
-# Shared by calculate_ce_out_mash() (05_owsa.R) and
-# run_model_psa_iter_all() (06_psa.R). LSM always has
-# treat_dur_cycles == 0, so its trace from the "Age12" run
-# (treat_start_immediate) is identical to a separately-run
-# natural-history LSM trace — no need to build it twice.
 
 run_three_strategies <- function(rr_reg, rr_prog,
                                  p_prog_month_local  = p_prog_month,

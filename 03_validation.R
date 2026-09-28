@@ -53,7 +53,6 @@ severe_states <- c("DCC", "HCC", "LT", "Post_LT")
 
 # Untreated (LSM, no treatment effect) trace of cumulative proportion
 # reaching a severe state, starting from a single fibrosis stage.
-# Shared by time_to_severe() and plot_severe_trajectory().
 pct_severe_trace <- function(start_state) {
 
   v_init_val <- setNames(rep(0, n_states), v_states)

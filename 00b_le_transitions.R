@@ -2,21 +2,18 @@
 # Requires: source("00_parameters.R")
 # ---------------------------------------------------------------------------
 # Reproducible derivation of fibrosis transition probabilities from the
-# REPORTED pooled incidence rates in Le et al. 2023, Clin Gastroenterol
-# Hepatol 2023;21:1154-1168.
+# reported pooled incidence rates in Le et al. 2023, Clin Gastroenterol
+# Hepatol 2023.
 #
 # Source tables (NAFLD rows = all-locations pooled estimate):
 #   Table 2 -> RCTs              (cases/100 PY, 95% CI, by baseline stage)
 #   Table 3 -> Observational     (cases/100 PY, 95% CI, by baseline stage)
-# Both pooled with a random-effects Poisson model. We use cases/100 PY (one
-# event = a patient advancing/regressing >= 1 stage) to
-# match the single-step structure of a monthly Markov cycle.
 #
 # ---------------------------------------------------------------------------
 
 ## ---- Conversion: cases per 100 person-years -> annual probability ----------
 # Rate r (per 100 PY) implies annual event probability 1 - exp(-r/100).
-# Point estimate AND each 95% CI bound are converted separately (nonlinear).
+# Point estimate AND each 95% CI bound are converted separately 
 rate100_to_p <- function(r_per_100py) 1 - exp(-r_per_100py / 100)
 
 ## ---- Le et al. Table 2: RCT pooled cases/100 PY (NAFLD) ---------------------
