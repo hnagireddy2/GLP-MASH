@@ -23,7 +23,7 @@ predict_progression_F2 <- function(p_prog_local) {
        ci_lo = ci_lo, ci_hi = ci_hi)
 }
 
-pp_chosen   <- build_p_prog_from_annual(candidate_sets[[best]], p_prog_month)
+pp_chosen   <- build_p_prog_from_annual(candidate_sets[[best]], p_prog_cycle)
 val_F2_prog <- predict_progression_F2(pp_chosen)
 
 cat("\n=== Validation: F2 Progression in ESSENCE Placebo ===\n")
@@ -61,7 +61,7 @@ pct_severe_trace <- function(start_state) {
   aP_val <- build_a_P(
     rr_reg             = c(LSM = 1, Semaglutide = 1),
     rr_prog            = c(LSM = 1, Semaglutide = 1),
-    p_prog_month_local = p_prog_month,
+    p_prog_cycle_local = p_prog_cycle,
     treat_dur_cycles   = c(LSM = 0L, Semaglutide = 0L),
     treat_start_cycles = c(LSM = 1L, Semaglutide = 1L)
   )

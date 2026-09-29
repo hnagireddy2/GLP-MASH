@@ -100,10 +100,10 @@ state_colors <- c(
 ggplot(df_trace_long, aes(x = Age, y = Proportion, fill = State)) +
   geom_area(alpha = 0.85) +
   scale_fill_manual(values = state_colors) +
-  scale_x_continuous("Age (years)", breaks = seq(10, 90, by = 10)) +
+  scale_x_continuous("Age (years)", breaks = seq(10, 100, by = 10)) +
   scale_y_continuous("Proportion of cohort", labels = percent_format()) +
   labs(title    = "Model-Predicted State Occupancy Over Time (LSM / Natural History)",
-       subtitle = "Starting cohort: F2/F3 adolescents at age 12; 80-year horizon") +
+       subtitle = "Starting cohort: F2/F3 adolescents at age 12; lifetime horizon") +
   theme_bw(base_size = txtsize) +
   theme(legend.position = "right")
 
@@ -114,7 +114,7 @@ df_dead <- df_trace_lsm %>%
 
 ggplot(df_dead, aes(x = Age, y = pct_dead)) +
   geom_line(color = "gray30", linewidth = 1.1) +
-  scale_x_continuous("Age (years)", breaks = seq(10, 90, by = 10)) +
+  scale_x_continuous("Age (years)", breaks = seq(10, 100, by = 10)) +
   scale_y_continuous("Cumulative proportion dead", labels = percent_format()) +
   labs(title    = "Model-Predicted Cumulative Mortality (LSM cohort)",
        subtitle = "Includes background + disease-specific mortality") +

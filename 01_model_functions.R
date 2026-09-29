@@ -10,41 +10,41 @@ apply_rr <- function(p, rr) {
 }
 
 build_cycle_P <- function(rr_regress_now, rr_progress_now,
-                          p_prog_month_local = p_prog_month) {
+                          p_prog_cycle_local = p_prog_cycle) {
   
   P <- matrix(0, n_states, n_states, dimnames=list(v_states,v_states))
   
 ### Fibrosis progression — progression RR applies only to F2->F3
-  P["F0","F1"]    <- clip01(p_prog_month_local$F0_F1)
-  P["F1","F2"]    <- clip01(p_prog_month_local$F1_F2)
-  P["F2","F3"]    <- clip01(apply_rr(p_prog_month_local$F2_F3, rr_progress_now))
-  P["F3","F4_CC"] <- clip01(p_prog_month_local$F3_F4)                   
+  P["F0","F1"]    <- clip01(p_prog_cycle_local$F0_F1)
+  P["F1","F2"]    <- clip01(p_prog_cycle_local$F1_F2)
+  P["F2","F3"]    <- clip01(apply_rr(p_prog_cycle_local$F2_F3, rr_progress_now))
+  P["F3","F4_CC"] <- clip01(p_prog_cycle_local$F3_F4)                   
 
 ### Fibrosis regression — regression RR applies to F2->F1 and F3->F2
-  P["F1","F0"]    <- clip01(p_prog_month_local$F1_F0)
-  P["F2","F1"]    <- clip01(apply_rr(p_prog_month_local$F2_F1, rr_regress_now))
-  P["F3","F2"]    <- clip01(apply_rr(p_prog_month_local$F3_F2, rr_regress_now))
-  P["F4_CC","F3"] <- clip01(p_prog_month_local$F4_F3)                               
+  P["F1","F0"]    <- clip01(p_prog_cycle_local$F1_F0)
+  P["F2","F1"]    <- clip01(apply_rr(p_prog_cycle_local$F2_F1, rr_regress_now))
+  P["F3","F2"]    <- clip01(apply_rr(p_prog_cycle_local$F3_F2, rr_regress_now))
+  P["F4_CC","F3"] <- clip01(p_prog_cycle_local$F4_F3)                               
   
   ### Advanced liver routes 
-  P["F3","HCC"]    <- clip01(p_prog_month_local$F3_HCC)
-  P["F4_CC","HCC"] <- clip01(p_prog_month_local$F4_HCC)
-  P["F4_CC","DCC"] <- clip01(p_prog_month_local$F4_DCC)
-  P["DCC","HCC"]   <- clip01(p_prog_month_local$DCC_HCC)
+  P["F3","HCC"]    <- clip01(p_prog_cycle_local$F3_HCC)
+  P["F4_CC","HCC"] <- clip01(p_prog_cycle_local$F4_HCC)
+  P["F4_CC","DCC"] <- clip01(p_prog_cycle_local$F4_DCC)
+  P["DCC","HCC"]   <- clip01(p_prog_cycle_local$DCC_HCC)
   
   ### Death from DC / HCC / LT / Post-LT
-  P["DCC","Dead"]     <- clip01(p_prog_month_local$DCC_Death)
-  P["HCC","Dead"]     <- clip01(p_prog_month_local$HCC_Death)
-  P["LT","Dead"]      <- clip01(p_prog_month_local$LT_Death)
-  P["Post_LT","Dead"] <- clip01(p_prog_month_local$PostLT_Death)
+  P["DCC","Dead"]     <- clip01(p_prog_cycle_local$DCC_Death)
+  P["HCC","Dead"]     <- clip01(p_prog_cycle_local$HCC_Death)
+  P["LT","Dead"]      <- clip01(p_prog_cycle_local$LT_Death)
+  P["Post_LT","Dead"] <- clip01(p_prog_cycle_local$PostLT_Death)
 
   ### Liver transplant
-  P["F4_CC","LT"] <- clip01(p_prog_month_local$F4_LT)
-  P["DCC","LT"]   <- clip01(p_prog_month_local$DCC_LT)
-  P["HCC","LT"]   <- clip01(p_prog_month_local$HCC_LT)
+  P["F4_CC","LT"] <- clip01(p_prog_cycle_local$F4_LT)
+  P["DCC","LT"]   <- clip01(p_prog_cycle_local$DCC_LT)
+  P["HCC","LT"]   <- clip01(p_prog_cycle_local$HCC_LT)
 
-  ### LT -> Post-LT
-  P["LT","Post_LT"] <- clip01(p_prog_month_local$LT_to_PostLT)
+  ### LT -> Post-LT (structural, all survivors; not capped)
+  P["LT","Post_LT"] <- p_prog_cycle_local$LT_to_PostLT
   P
 }
 
@@ -53,7 +53,7 @@ build_cycle_P <- function(rr_regress_now, rr_progress_now,
 ##############################################################
 
 build_a_P <- function(rr_reg, rr_prog,
-                      p_prog_month_local = p_prog_month,
+                      p_prog_cycle_local = p_prog_cycle,
                       treat_dur_cycles   = NULL,
                       treat_start_cycles = NULL) {
 
@@ -83,38 +83,32 @@ build_a_P <- function(rr_reg, rr_prog,
         rrprog<- 1.0
       }
 
-      P <- build_cycle_P(rrreg, rrprog, p_prog_month_local)
+      P <- build_cycle_P(rrreg, rrprog, p_prog_cycle_local)
 
-      ### Add age-specific background mortality 
-      p_bg_t <- v_p_bg_month[t]
+      ### Death first: disease-specific + age-specific background mortality
+      p_bg_t <- v_p_bg_cycle[t]
 
       for (s in v_states[v_states != "Dead"]) {
-        base_p_death   <- P[s, "Dead"]
-        p_total_death  <- 1 - (1 - base_p_death) * (1 - p_bg_t)
-        P[s, "Dead"]   <- clip01(p_total_death)
+        P[s, "Dead"] <- clip01(1 - (1 - P[s, "Dead"]) * (1 - p_bg_t))
       }
 
       P["Dead",]       <- 0
       P["Dead","Dead"] <- 1
 
-      ### Stay probabilities — death is protected; other transitions absorb
-      ### any overflow (death was already correctly combined via the
-      ### competing-risk formula above and must never be diluted by
-      ### rescaling it alongside the disease transitions)
-      for(s in v_states){
-        if(s != "Dead"){
-          p_death   <- P[s, "Dead"]
-          idx_other <- setdiff(v_states, c(s, "Dead"))
-          sum_other <- sum(P[s, idx_other])
-          max_other <- 1 - p_death
+      ### Other transitions apply to survivors only; stay = remainder
+      for (s in v_states[v_states != "Dead"]) {
+        p_death   <- P[s, "Dead"]
+        idx_other <- setdiff(v_states, c(s, "Dead"))
+        P[s, idx_other] <- P[s, idx_other] * (1 - p_death)
+        sum_other <- sum(P[s, idx_other])
 
-          if(sum_other > max_other){
-            P[s, idx_other] <- P[s, idx_other] * (max_other / sum_other)
-            sum_other <- max_other
-          }
-
-          P[s, s] <- 1 - p_death - sum_other
+        # Overflow guard (row sum > 1)
+        if (sum_other > 1 - p_death) {
+          P[s, idx_other] <- P[s, idx_other] * ((1 - p_death) / sum_other)
+          sum_other <- 1 - p_death
         }
+
+        P[s, s] <- 1 - p_death - sum_other
       }
 
       a_P[,,t,stg] <- P
@@ -149,35 +143,30 @@ run_markov <- function(P4d_single, v_init){
 summarize_outcomes <- function(trace, drug_cost_per_year,
                                util_matrix, bg_cost_cycle,
                                cost_vector,
-                               treat_dur_cycles) {
+                               treat_dur_cycles,
+                               treat_start_cycle = 1L) {
 
   util_mat <- util_matrix[, v_states]
 
-  # State costs
-  v_cost_state_annual <- trace %*% matrix(cost_vector[v_states], ncol=1)
-  v_cost_state_cycle  <- v_cost_state_annual * cycle_length
+  # State costs (annual x cycle length); LT is a one-time cost
+  v_cost_cycle       <- cost_vector[v_states] * cycle_length
+  v_cost_cycle["LT"] <- cost_vector["LT"]
+  v_cost_state_cycle <- as.vector(trace %*% v_cost_cycle)
 
-  # Drug cost while on treatment
-    on_vec <- rep(0, n_cycles + 1)
-    if (treat_dur_cycles > 0) {
-    idx_end <- min(treat_dur_cycles, n_cycles + 1)
-    on_vec[1:idx_end] <- 1
-     }
-
-    years_on_treat  <- sum(on_vec) * cycle_length
-    total_drug_cost <- drug_cost_per_year * years_on_treat
-
-    v_cost_drug_cycle <- rep(0, n_cycles + 1)
-    if (sum(on_vec) > 0) {
-     v_cost_drug_cycle[on_vec == 1] <- total_drug_cost / sum(on_vec)
-      }
+  # Drug cost: start of each treated cycle, alive cohort, from treatment start
+  v_cost_drug_cycle <- rep(0, n_cycles + 1)
+  if (treat_dur_cycles > 0) {
+    idx_on <- treat_start_cycle:min(treat_start_cycle + treat_dur_cycles - 1, n_cycles)
+    v_cost_drug_cycle[idx_on] <- drug_cost_per_year * cycle_length *
+                                 (1 - trace[idx_on, "Dead"])
+  }
 
   # Background cost -- applies only to Post_LT
   bg_cost_extended <- c(bg_cost_cycle[1], bg_cost_cycle)
   v_bg_cost_cycle <- bg_cost_extended * trace[, "Post_LT"]
 
-  # Total cost
-  v_cost_total <- v_cost_state_cycle + v_cost_drug_cycle + v_bg_cost_cycle
+  # Total cost (half-cycle correction on state-based costs only)
+  v_cost_hc <- v_cost_state_cycle + v_bg_cost_cycle
 
   # QALYs
   v_qaly_state <- rowSums(trace * util_mat)
@@ -188,7 +177,7 @@ summarize_outcomes <- function(trace, drug_cost_per_year,
   # Discount + half-cycle
   tot_LY   <- sum(LY * v_wcc * v_dwu) * cycle_length
   tot_QALY <- sum(v_qaly_state * v_wcc * v_dwu) * cycle_length
-  tot_cost <- sum(v_cost_total * v_wcc * v_dwc)
+  tot_cost <- sum(v_cost_hc * v_wcc * v_dwc) + sum(v_cost_drug_cycle * v_dwc)
 
   c(LY=tot_LY, QALY=tot_QALY, Cost=tot_cost)
 }
@@ -200,7 +189,8 @@ summarize_outcomes <- function(trace, drug_cost_per_year,
 summarize_strategies <- function(traces_list, scenario_name,
                                  util_matrix, bg_cost_cycle,
                                  cost_vector, drug_cost_vec,
-                                 treat_dur_cycles_vec) {
+                                 treat_dur_cycles_vec,
+                                 treat_start_cycles_vec = treat_start_immediate) {
 
   res_mat <- sapply(treatments, function(stg){
 
@@ -210,7 +200,8 @@ summarize_strategies <- function(traces_list, scenario_name,
       util_matrix        = util_matrix,
       bg_cost_cycle      = bg_cost_cycle,
       cost_vector        = cost_vector,
-      treat_dur_cycles   = treat_dur_cycles_vec[stg]
+      treat_dur_cycles   = treat_dur_cycles_vec[stg],
+      treat_start_cycle  = treat_start_cycles_vec[stg]
     )
   })
 
@@ -244,13 +235,13 @@ run_owsa_icer <- function(rr_regress_vec      = rr_regress,
                           cost_vector         = costs_base,
                           drug_cost_vec       = drug_cost,
                           bg_cost_cycle_vec   = v_background_cost_cycle,
-                          p_prog_month_local  = p_prog_month,
+                          p_prog_cycle_local  = p_prog_cycle,
                           treat_dur_cycles_vec = base_treat_dur_cycles,
                           treat_start_cycles   = treat_start_immediate,
                           v_init_vec          = v_init) {
 
   a_P_loc <- build_a_P(rr_regress_vec, rr_progress_vec,
-                       p_prog_month_local,
+                       p_prog_cycle_local,
                        treat_dur_cycles   = treat_dur_cycles_vec,
                        treat_start_cycles = treat_start_cycles)
 
@@ -265,7 +256,8 @@ run_owsa_icer <- function(rr_regress_vec      = rr_regress,
     bg_cost_cycle_vec,
     cost_vector,
     drug_cost_vec,
-    treat_dur_cycles_vec
+    treat_dur_cycles_vec,
+    treat_start_cycles
   )
 
   icer_vs_lsm(res_loc)
@@ -277,7 +269,7 @@ run_owsa_icer <- function(rr_regress_vec      = rr_regress,
 
 run_strategy <- function(treat_start, label) {
   aP_sc <- build_a_P(rr_regress, rr_progress,
-                     p_prog_month_local = p_prog_month,
+                     p_prog_cycle_local = p_prog_cycle,
                      treat_dur_cycles   = treat_dur_72w_cycles,
                      treat_start_cycles = treat_start)
 
@@ -288,7 +280,8 @@ run_strategy <- function(treat_start, label) {
   list(
     summary = summarize_strategies(traces_sc, label, m_util_base,
                                    v_background_cost_cycle, costs_base,
-                                   drug_cost, treat_dur_cycles_vec = treat_dur_72w_cycles),
+                                   drug_cost, treat_dur_cycles_vec = treat_dur_72w_cycles,
+                                   treat_start_cycles_vec = treat_start),
     traces  = traces_sc
   )
 }
@@ -298,7 +291,7 @@ run_strategy <- function(treat_start, label) {
 #############################################################
 
 run_three_strategies <- function(rr_reg, rr_prog,
-                                 p_prog_month_local  = p_prog_month,
+                                 p_prog_cycle_local  = p_prog_cycle,
                                  util_matrix         = m_util_base,
                                  cost_vector         = costs_base,
                                  drug_cost_vec       = drug_cost,
@@ -307,22 +300,24 @@ run_three_strategies <- function(rr_reg, rr_prog,
                                  v_init_vec          = v_init) {
 
   aP_12 <- build_a_P(rr_reg, rr_prog,
-                     p_prog_month_local = p_prog_month_local,
+                     p_prog_cycle_local = p_prog_cycle_local,
                      treat_dur_cycles   = treat_dur_cycles_vec,
                      treat_start_cycles = treat_start_immediate)
   traces_12 <- lapply(treatments, function(stg) run_markov(aP_12[,,,stg], v_init_vec))
   names(traces_12) <- treatments
   res_12 <- summarize_strategies(traces_12, "Age12", util_matrix, bg_cost_cycle_vec,
-                                 cost_vector, drug_cost_vec, treat_dur_cycles_vec)
+                                 cost_vector, drug_cost_vec, treat_dur_cycles_vec,
+                                 treat_start_immediate)
 
   aP_18 <- build_a_P(rr_reg, rr_prog,
-                     p_prog_month_local = p_prog_month_local,
+                     p_prog_cycle_local = p_prog_cycle_local,
                      treat_dur_cycles   = treat_dur_cycles_vec,
                      treat_start_cycles = treat_start_age18)
   traces_18 <- lapply(treatments, function(stg) run_markov(aP_18[,,,stg], v_init_vec))
   names(traces_18) <- treatments
   res_18 <- summarize_strategies(traces_18, "Age18", util_matrix, bg_cost_cycle_vec,
-                                 cost_vector, drug_cost_vec, treat_dur_cycles_vec)
+                                 cost_vector, drug_cost_vec, treat_dur_cycles_vec,
+                                 treat_start_age18)
 
   list(
     "LSM"               = c(Cost = res_12$Cost[res_12$Strategy == "LSM"],

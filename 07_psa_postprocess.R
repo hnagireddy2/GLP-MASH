@@ -9,31 +9,30 @@
 txtsize <- 13
 v_wtp <- seq(0, 600000, by = 10000)
 
-# Rename columns 
+# Display names (transitions = annual probabilities; LT death = per cycle)
 param_display_names <- c(
   rr_sema_regress  = "Sema RR: Regression",
   rr_sema_progress = "Sema RR: Progression",
-  h_F0_F1          = "Hazard F0\u2192F1",
-  h_F1_F0          = "Hazard F1\u2192F0",
-  h_F1_F2          = "Hazard F1\u2192F2",
-  h_F2_F1          = "Hazard F2\u2192F1",
-  h_F2_F3          = "Hazard F2\u2192F3",
-  h_F3_F2          = "Hazard F3\u2192F2",
-  h_F3_F4          = "Hazard F3\u2192F4",
-  h_F4_F3          = "Hazard F4\u2192F3",
-  h_F4_DCC         = "Hazard F4\u2192DCC",
-  h_F3_HCC         = "Hazard F3\u2192HCC",
-  h_F4_HCC         = "Hazard F4\u2192HCC",
-  h_DCC_HCC        = "Hazard DCC\u2192HCC",
-  h_DCC_LT         = "Hazard DCC\u2192LT",
-  h_HCC_LT         = "Hazard HCC\u2192LT",
-  h_DCC_Death      = "DCC\u2192Death",
-  h_HCC_Death      = "HCC\u2192Death",
-  h_LT_Death       = "LT\u2192Death (yr 1)",
-  h_PostLT_Death   = "Post-LT\u2192Death",
+  p_F0_F1          = "F0\u2192F1",
+  p_F1_F0          = "F1\u2192F0",
+  p_F1_F2          = "F1\u2192F2",
+  p_F2_F1          = "F2\u2192F1",
+  p_F2_F3          = "F2\u2192F3",
+  p_F3_F2          = "F3\u2192F2",
+  p_F3_F4          = "F3\u2192F4",
+  p_F4_F3          = "F4\u2192F3",
+  p_F4_DCC         = "F4\u2192DCC",
+  p_F3_HCC         = "F3\u2192HCC",
+  p_F4_HCC         = "F4\u2192HCC",
+  p_DCC_HCC        = "DCC\u2192HCC",
+  p_DCC_LT         = "DCC\u2192LT",
+  p_HCC_LT         = "HCC\u2192LT",
+  p_DCC_Death      = "DCC\u2192Death",
+  p_HCC_Death      = "HCC\u2192Death",
+  p_LT_Death       = "LT\u2192Death (perioperative)",
+  p_PostLT_Death   = "Post-LT\u2192Death",
   qdec_F0_F2       = "Util dec: F0\u2013F2",
-  qdec_F3          = "Util dec: F3",
-  qdec_F4_CC       = "Util dec: F4/CC",
+  qdec_F3_F4       = "Util dec: F3/F4",
   qdec_DCC         = "Util dec: DCC",
   qdec_HCC         = "Util dec: HCC",
   qdec_LT          = "Util dec: LT",
@@ -70,6 +69,10 @@ l_psa_all <- make_psa_obj(
   parameters    = df_psa_input_all,
   strategies    = all_strat_labels
 )
+
+## Restore readable strategy names (make_psa_obj applies make.names)
+l_psa_all$strategies <- all_strat_labels
+colnames(l_psa_all$cost) <- colnames(l_psa_all$effectiveness) <- all_strat_labels
 
 ## ---- Compute PSA means and run calculate_icers -----------------------------
 psa_means_all <- summary(l_psa_all)
@@ -115,11 +118,8 @@ plot(l_psa_all) +
 ####### All-Strategy CEAC & Expected Loss — Post-PSA ########
 #############################################################
 
-okabe_ito_9 <- c(
-  "#E69F00", "#56B4E9", "#009E73", "#F0E442",
-  "#0072B2", "#D55E00", "#CC79A7", "#999999", "#000000"
-)
-names(okabe_ito_9) <- all_strat_labels
+okabe_ito_3 <- c("#999999", "#0072B2", "#D55E00")
+names(okabe_ito_3) <- all_strat_labels
 
 v_wtp_all <- seq(0, 600000, by = 10000)
 
@@ -141,8 +141,8 @@ df_psa_all_means <- df_psa_all_means %>%
   mutate(
     age_grp = dplyr::case_when(
       Strategy == "LSM"                   ~ "LSM",
-      grepl("Start Age 12", Strategy)     ~ "Treat Age 12",
-      grepl("Start Age 18", Strategy)     ~ "Treat Age 18"
+      grepl("Age 12", Strategy)           ~ "Treat Age 12",
+      grepl("Age 18", Strategy)           ~ "Treat Age 18"
     ),
     dom_status = dplyr::case_when(
       Strategy %in% filter(df_frontier_all, Status == "D")$Strategy  ~ "Dominated",
@@ -166,7 +166,8 @@ ggplot(df_psa_all_means, aes(x = QALY, y = Cost,
   scale_shape_manual(
     name   = "Dominance status",
     values = c("Non-dominated"    = 16,
-               "Dominated"        = 17)
+               "Dominated"        = 17,
+               "Weakly dominated" = 15)
   ) +
   scale_color_manual(
     name   = "Strategy",
@@ -196,7 +197,7 @@ print(df_frontier_all)
 ceac_all <- ceac(wtp = v_wtp_all, psa = l_psa_all)
 
 plot(ceac_all) +
-  scale_color_manual(values = unname(okabe_ito_9)) +
+  scale_color_manual(values = unname(okabe_ito_3)) +
   labs(
     title    = "Cost-Effectiveness Acceptability Curve — All Strategies",
     subtitle = "Probability each strategy is cost-effective at each WTP threshold",
@@ -212,7 +213,7 @@ plot(ceac_all) +
 elc_all <- calc_exp_loss(wtp = v_wtp_all, psa = l_psa_all)
 
 plot(elc_all) +
-  scale_color_manual(values = unname(okabe_ito_9)) +
+  scale_color_manual(values = unname(okabe_ito_3)) +
   labs(
     title    = "Expected Loss Curve — All Strategies",
     subtitle = "Expected opportunity loss (foregone net benefit) at each WTP threshold",
@@ -256,20 +257,21 @@ frac_dE_le0 <- mean(d_qaly <= 0)
 icer_draws <- d_cost / d_qaly
 icer_ui    <- quantile(icer_draws, c(.025, .975), na.rm = TRUE)
 
-# ---- 5. INMB-based interval + P(cost-effective) at thresholds ----
-wtp_vec <- c(50000, 100000, 116000, 150000)   # set to thresholds
-inmb_tbl <- do.call(rbind, lapply(wtp_vec, function(w) {
-  inmb <- w * d_qaly - d_cost                  # linear -> well-behaved
+# ---- 5. INMB-based interval + P(cost-effective) at WTP thresholds ----
+# wtp = willingness-to-pay threshold ($/QALY); base-case WTP = $150,000
+wtp_vec <- c(50000, 100000, 150000)
+inmb_tbl <- do.call(rbind, lapply(wtp_vec, function(wtp) {
+  inmb <- wtp * d_qaly - d_cost                # INMB = WTP x dQALY - dCost
   data.frame(
-    WTP        = w,
+    WTP        = wtp,
     INMB_mean  = mean(inmb),
     INMB_lower = quantile(inmb, .025),
     INMB_upper = quantile(inmb, .975),
-    P_CE       = mean(inmb > 0)                 # prob cost-effective at w
+    P_CE       = mean(inmb > 0)                 # P(cost-effective vs LSM) at this WTP
   )
 }))
 
-# ---- 6. Fieller CI (analytic, true frequentist CI) — robustness ----
+# ---- 6. Fieller-type interval (robustness check) ----
 fieller_ci <- function(dc, de, level = .95) {
   ok <- is.finite(dc) & is.finite(de)        # drop NA/NaN/Inf pairs
   dc <- dc[ok]; de <- de[ok]
@@ -297,7 +299,7 @@ cat(sprintf("  Point ICER          : $%s/QALY\n", format(round(icer_point), big.
 cat(sprintf("  95%% UI (percentile) : $%s to $%s/QALY\n",
             format(round(icer_ui[1]), big.mark = ","),
             format(round(icer_ui[2]), big.mark = ",")))
-cat(sprintf("  95%% CI (Fieller)    : $%s to $%s/QALY\n",
+cat(sprintf("  95%% Fieller-type interval (robustness): $%s to $%s/QALY\n",
             format(round(icer_ci_fieller[1]), big.mark = ","),
             format(round(icer_ci_fieller[2]), big.mark = ",")))
 cat(sprintf("  Frac draws ΔQALY<=0  : %.3f%%\n\n", 100 * frac_dE_le0))

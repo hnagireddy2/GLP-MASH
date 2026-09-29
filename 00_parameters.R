@@ -80,8 +80,8 @@ mort_cost_df <- read.csv("age_mort_background_costs.csv", fileEncoding = "UTF-8-
 
 cycle_length <- 4 / 52.1429  # 4-week cycles
 age_start    <- 12
-time_horizon <- 80           # 80 years
-age_end      <- age_start + time_horizon
+age_end      <- 101          # lifetime (life table q(100) = 1)
+time_horizon <- age_end - age_start
 n_cycles     <- ceiling(time_horizon / cycle_length)
 
 #############################################################
@@ -105,27 +105,27 @@ v_init <- c(F0 = 0,    F1 = 0,    F2 = 0.686, F3 = 0.314,
 ############################ Costs ##########################
 #############################################################
 
-# Annual state costs, rebased to 2025 USD.
+# Annual state costs, 2022 -> 2025 USD: x (PHC 2024/2022) x (PCE-Health 2025/2024) = x 1.084369
 costs_base <- c(
-  F0=7672, F1=7672, F2=7672, F3=9149, F4_CC=37231,
-  DCC=172147, HCC=124919,
-  LT=252739,
+  F0=7659, F1=7659, F2=7659, F3=9133, F4_CC=37167,
+  DCC=171851, HCC=124704,
+  LT=252305,
   Post_LT=1840, Dead=0
 )
 
-# Low/high bounds 
+# Low/high bounds (±20% of base)
 costs_low <- c(
-  F0=6137, F1=6137, F2=6137, F3=7319, F4_CC=29785,
-  DCC=137717, HCC=99935,
-  LT=202192
+  F0=6126, F1=6126, F2=6126, F3=7306, F4_CC=29734,
+  DCC=137480, HCC=99763,
+  LT=201845
 )
 costs_high <- c(
-  F0=9206, F1=9206, F2=9206, F3=10980, F4_CC=44678,
-  DCC=206576, HCC=149903,
-  LT=303287
+  F0=9190, F1=9190, F2=9190, F3=10961, F4_CC=44601,
+  DCC=206221, HCC=149645,
+  LT=302766
 )
 
-### Drug costs (annual)
+### Drug costs (annual; Wegovy 2.4 mg, FSS price)
 cost_lsm        <- 0
 cost_sema_base  <- 14832
 cost_sema_low   <- 4188
@@ -154,14 +154,14 @@ v_wcc <- c(0.5, rep(1, n_cycles-1), 0.5)
 ages_cycles <- age_start + (0:(n_cycles - 1)) * cycle_length   # length n_cycles
 ages_states <- age_start + (0:n_cycles)       * cycle_length   # length n_cycles + 1
 
-## Overall background mortality (annual) -> monthly
+## Overall background mortality (annual) -> per cycle
 ## prob_to_rate -> rate_to_prob
 v_p_bg_annual <- approx(mort_cost_df$age,
                         mort_cost_df$background_mortality_prob,
                         ages_cycles, rule=2)$y
 
 v_r_bg_annual <- prob_to_rate(v_p_bg_annual)               # hazard per year
-v_p_bg_month  <- rate_to_prob(v_r_bg_annual, cycle_length) # monthly prob
+v_p_bg_cycle  <- rate_to_prob(v_r_bg_annual, cycle_length) # per-cycle prob
 
 ## Background costs
 v_background_cost_annual <-
@@ -214,8 +214,8 @@ m_util_base <- build_util_matrix(v_util_age_base, qaly_dec_base)
 ################### TRANSITION PROBABILITIES ################
 #############################################################
 
-# Function for annual probability -> monthly probability
-annual_to_month <- function(p_annual) {
+# Function for annual probability -> per-cycle (4-week) probability
+annual_to_cycle <- function(p_annual) {
   rate_to_prob(prob_to_rate(p_annual), cycle_length)
 }
 
@@ -233,33 +233,34 @@ nonfib_annual <- list(
   DCC_RegressF4 = 0.0,      # structural
   HCC_RegressF4 = 0.0,      # structural
   LT_to_PostLT  = 1.0,      # structural (deterministic) — LT is a single-cycle "transplant event/cost" state
-  LT_Death      = 0.0157,
-  PostLT_Death  = 0.040365
+  PostLT_Death  = 0.040365  # Bezinover 2023 (background-netted)
 )
 
-# Convert to monthly probabilities (except the deterministic post-LT ones)
-p_prog_month <- list(
+# ---- LT perioperative mortality (per-cycle probability, not annual) ----
+LT_Death_cycle <- 0.0157    # Sharma 2018 90-day mortality -> one cycle (background-netted)
+
+# Convert to per-cycle (4-week) probabilities
+p_prog_cycle <- list(
   
   # ---- Fibrosis transitions: pre-calibration placeholder zeros ----
   F0_F1 = 0, F1_F0 = 0, F1_F2 = 0, F2_F1 = 0,
   F2_F3 = 0, F3_F2 = 0, F3_F4 = 0, F4_F3 = 0,
 
   # ---- Fixed transitions ----
-  F3_HCC        = annual_to_month(nonfib_annual$F3_HCC),
-  F4_HCC        = annual_to_month(nonfib_annual$F4_HCC),
-  F4_DCC        = annual_to_month(nonfib_annual$F4_DCC),
-  DCC_HCC       = annual_to_month(nonfib_annual$DCC_HCC),
-  DCC_LT        = annual_to_month(nonfib_annual$DCC_LT),
-  DCC_Death     = annual_to_month(nonfib_annual$DCC_Death),
-  HCC_LT        = annual_to_month(nonfib_annual$HCC_LT),
-  HCC_Death     = annual_to_month(nonfib_annual$HCC_Death),
-  F4_LT         = annual_to_month(nonfib_annual$F4_LT),
-  DCC_RegressF4 = annual_to_month(nonfib_annual$DCC_RegressF4),
-  HCC_RegressF4 = annual_to_month(nonfib_annual$HCC_RegressF4),
+  F3_HCC        = annual_to_cycle(nonfib_annual$F3_HCC),
+  F4_HCC        = annual_to_cycle(nonfib_annual$F4_HCC),
+  F4_DCC        = annual_to_cycle(nonfib_annual$F4_DCC),
+  DCC_HCC       = annual_to_cycle(nonfib_annual$DCC_HCC),
+  DCC_LT        = annual_to_cycle(nonfib_annual$DCC_LT),
+  DCC_Death     = annual_to_cycle(nonfib_annual$DCC_Death),
+  HCC_LT        = annual_to_cycle(nonfib_annual$HCC_LT),
+  HCC_Death     = annual_to_cycle(nonfib_annual$HCC_Death),
+  F4_LT         = annual_to_cycle(nonfib_annual$F4_LT),
+  DCC_RegressF4 = annual_to_cycle(nonfib_annual$DCC_RegressF4),
+  HCC_RegressF4 = annual_to_cycle(nonfib_annual$HCC_RegressF4),
   LT_to_PostLT  = nonfib_annual$LT_to_PostLT,
-  # LT_Death is a one-time cumulative probability (1 - 1yr survival)
-  LT_Death      = nonfib_annual$LT_Death,
-  PostLT_Death  = annual_to_month(nonfib_annual$PostLT_Death)
+  LT_Death      = LT_Death_cycle,   # already per-cycle
+  PostLT_Death  = annual_to_cycle(nonfib_annual$PostLT_Death)
 )
 
 #############################################################
@@ -355,11 +356,11 @@ treat_dur_72w_years <- 72/52   # ~1.385 years
 
 treat_dur_72w_cycles <- c(LSM = 0L,
                           Semaglutide = round(treat_dur_72w_years / cycle_length))
-# ~17 monthly cycles
+# 18 four-week cycles
 
 base_treat_dur_cycles <- treat_dur_72w_cycles
 
-# Delay from age 12 to age 18 (6 years = 72 cycles)
+# Delay from age 12 to age 18 (6 years = 78 cycles)
 delay_to_18_cycles <- round((18 - 12) / cycle_length)
 
 treat_start_immediate <- c(LSM = 1L, Semaglutide = 1L)

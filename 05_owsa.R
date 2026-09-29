@@ -8,34 +8,33 @@
 
 owsa_params <- list()
 
-###### 1. Transition probabilities (from obs. data)
+###### 1. Fibrosis progression (Le et al. 95% CI)
+icer_fibprog_lo <- run_owsa_icer(p_prog_cycle_local = p_cycle_fibprog_low)
+icer_fibprog_hi <- run_owsa_icer(p_prog_cycle_local = p_cycle_fibprog_high)
+owsa_params[["fib_progression"]] <- c(low = icer_fibprog_lo, high = icer_fibprog_hi)
 
-icer_progobs_lo <- run_owsa_icer(
-  p_prog_month_local = p_prog_month_le_low
-)
-icer_progobs_hi <- run_owsa_icer(
-  p_prog_month_local = p_prog_month_le_high
-)
-owsa_params[["baseline_transitions"]] <- c(
-  low  = icer_progobs_lo,
-  high = icer_progobs_hi
-)
+###### 2. Fibrosis regression (Le et al. 95% CI)
+icer_fibreg_lo <- run_owsa_icer(p_prog_cycle_local = p_cycle_fibreg_low)
+icer_fibreg_hi <- run_owsa_icer(p_prog_cycle_local = p_cycle_fibreg_high)
+owsa_params[["fib_regression"]] <- c(low = icer_fibreg_lo, high = icer_fibreg_hi)
 
-###### 2. Semaglutide efficacy (regression RR)
-rr_reg_base <- rr_regress["Semaglutide"]
-rr_reg_SA   <- RR_reg_hi   # upper CI bound from ESSENCE derivation
+###### 3. Semaglutide regression RR (ESSENCE 95% CI)
+rr_reg_vec_lo <- rr_regress; rr_reg_vec_lo["Semaglutide"] <- RR_reg_lo
+rr_reg_vec_hi <- rr_regress; rr_reg_vec_hi["Semaglutide"] <- RR_reg_hi
 
-rr_reg_lo <- rr_regress; rr_reg_lo["Semaglutide"] <- rr_reg_base         
-rr_reg_hi <- rr_regress; rr_reg_hi["Semaglutide"] <- rr_reg_SA           
+icer_rrreg_lo <- run_owsa_icer(rr_regress_vec = rr_reg_vec_lo)
+icer_rrreg_hi <- run_owsa_icer(rr_regress_vec = rr_reg_vec_hi)
+owsa_params[["sema_rr_regression"]] <- c(low = icer_rrreg_lo, high = icer_rrreg_hi)
 
-icer_sema_lo <- run_owsa_icer(rr_regress_vec = rr_reg_lo,
-                                       rr_progress_vec = rr_progress)
-icer_sema_hi <- run_owsa_icer(rr_regress_vec = rr_reg_hi,
-                                       rr_progress_vec = rr_progress)
-owsa_params[["sema_efficacy"]] <- c(low = icer_sema_lo,
-                                       high = icer_sema_hi)
+###### 4. Semaglutide progression RR (ESSENCE 95% CI)
+rr_prog_vec_lo <- rr_progress; rr_prog_vec_lo["Semaglutide"] <- RR_prog_lo
+rr_prog_vec_hi <- rr_progress; rr_prog_vec_hi["Semaglutide"] <- RR_prog_hi
 
-###### 3. State-specific medical costs (0.75x vs 1.25x)
+icer_rrprog_lo <- run_owsa_icer(rr_progress_vec = rr_prog_vec_lo)
+icer_rrprog_hi <- run_owsa_icer(rr_progress_vec = rr_prog_vec_hi)
+owsa_params[["sema_rr_progression"]] <- c(low = icer_rrprog_lo, high = icer_rrprog_hi)
+
+###### 5. State-specific medical costs (0.75x vs 1.25x)
 cost_lo <- costs_base * 0.75
 cost_hi <- costs_base * 1.25
 
@@ -44,7 +43,7 @@ icer_cost_hi <- run_owsa_icer(cost_vector = cost_hi)
 owsa_params[["state_costs"]] <- c(low = icer_cost_lo,
                                      high = icer_cost_hi)
 
-###### 4. LT procedure cost (sourced low/high bounds)
+###### 6. LT procedure cost (±20%)
 costs_lt_lo <- costs_base
 costs_lt_hi <- costs_base
 costs_lt_lo["LT"] <- costs_low["LT"]
@@ -54,7 +53,7 @@ icer_lt_lo <- run_owsa_icer(cost_vector = costs_lt_lo)
 icer_lt_hi <- run_owsa_icer(cost_vector = costs_lt_hi)
 owsa_params[["lt_cost"]] <- c(low = icer_lt_lo, high = icer_lt_hi)
 
-###### 5. Annual cost of semaglutide
+###### 7. Annual cost of semaglutide
 lo_drug <- drug_cost; lo_drug["Semaglutide"] <- cost_sema_low
 hi_drug <- drug_cost; hi_drug["Semaglutide"] <- cost_sema_high
 
@@ -63,7 +62,7 @@ icer_treat_hi <- run_owsa_icer(drug_cost_vec = hi_drug)
 owsa_params[["sema_cost"]] <- c(low = icer_treat_lo,
                                    high = icer_treat_hi)
 
-###### 6. Utility scale (QALYs)
+###### 8. Utility scale (QALYs)
 icer_u_lo <- run_owsa_icer(util_matrix = m_util_base * 0.9)
 icer_u_hi <- run_owsa_icer(util_matrix = pmin(m_util_base * 1.1, 1))
 owsa_params[["qalys"]] <- c(low = icer_u_lo,
@@ -100,23 +99,27 @@ calculate_ce_out_mash <- function(l_params, n_wtp = wtp_threshold) {
   drug_loc  <- drug_cost
   drug_loc["Semaglutide"] <- l_params[["Semaglutide annual cost"]]
 
-  qdec_loc     <- pmin(qaly_dec_base * l_params[["Health state utilities (0.9x-1.1x)"]], 1)
+  qdec_loc     <- pmin(qaly_dec_base * l_params[["Utility decrements (0.9x-1.1x)"]], 1)
   util_mat_loc <- build_util_matrix(v_util_age_base, qdec_loc)
 
-  prog_sc <- l_params[["Transition probabilities (0.75x-1.25x)"]]
-  p_prog_loc <- p_prog_month
-  fib_transitions <- c("F0_F1", "F1_F0", "F1_F2", "F2_F1",
-                       "F2_F3", "F3_F2", "F3_F4", "F4_F3")
-  for (nm in fib_transitions) {
-    p_prog_loc[[nm]] <- rate_to_prob(prob_to_rate(p_prog_month[[nm]], cycle_length) * prog_sc,
+  ## Fibrosis progression / regression rate multipliers
+  prog_sc <- l_params[["Fibrosis progression (0.75x-1.25x)"]]
+  reg_sc  <- l_params[["Fibrosis regression (0.75x-1.25x)"]]
+  p_prog_loc <- p_prog_cycle
+  for (nm in fib_prog_names) {
+    p_prog_loc[[nm]] <- rate_to_prob(prob_to_rate(p_prog_cycle[[nm]], cycle_length) * prog_sc,
                                      cycle_length)
   }
-  p_prog_loc$DCC_Death <- annual_to_month(l_params[["DCC->Death (annual)"]])
-  p_prog_loc$HCC_Death <- annual_to_month(l_params[["HCC->Death (annual)"]])
-  p_prog_loc$F4_DCC    <- annual_to_month(l_params[["F4->DCC (annual)"]])
+  for (nm in fib_reg_names) {
+    p_prog_loc[[nm]] <- rate_to_prob(prob_to_rate(p_prog_cycle[[nm]], cycle_length) * reg_sc,
+                                     cycle_length)
+  }
+  p_prog_loc$DCC_Death <- annual_to_cycle(l_params[["DCC->Death (annual)"]])
+  p_prog_loc$HCC_Death <- annual_to_cycle(l_params[["HCC->Death (annual)"]])
+  p_prog_loc$F4_DCC    <- annual_to_cycle(l_params[["F4->DCC (annual)"]])
 
   results <- run_three_strategies(rr_reg_loc, rr_prog_loc,
-                                  p_prog_month_local  = p_prog_loc,
+                                  p_prog_cycle_local  = p_prog_loc,
                                   util_matrix          = util_mat_loc,
                                   cost_vector           = cost_loc,
                                   drug_cost_vec         = drug_loc,
@@ -136,25 +139,27 @@ calculate_ce_out_mash <- function(l_params, n_wtp = wtp_threshold) {
 df_params_owsa <- data.frame(
   pars = c("Semaglutide regression RR",
            "Semaglutide progression RR",
-           "Transition probabilities (0.75x-1.25x)",
+           "Fibrosis progression (0.75x-1.25x)",
+           "Fibrosis regression (0.75x-1.25x)",
            "State medical costs (0.75x-1.25x)",
            "Semaglutide annual cost",
-           "Health state utilities (0.9x-1.1x)",
+           "Utility decrements (0.9x-1.1x)",
            "Discount rate",
            "DCC->Death (annual)", 
            "HCC->Death (annual)", 
            "F4->DCC (annual)"),
-  min = c(1.0,         RR_progress, 0.75, 0.75, cost_sema_low,  0.90, 0.00, 0.1216, 0.1049, 0.0400),
-  max = c(RR_reg_hi,   1.0,         1.25, 1.25, cost_sema_high, 1.10, 0.05, 0.2784, 0.1561, 0.0918)
+  min = c(RR_reg_lo, RR_prog_lo, 0.75, 0.75, 0.75, cost_sema_low,  0.90, 0.00, 0.1216, 0.1049, 0.0400),
+  max = c(RR_reg_hi, RR_prog_hi, 1.25, 1.25, 1.25, cost_sema_high, 1.10, 0.05, 0.2784, 0.1561, 0.0918)
 )
 
 l_params_basecase <- list(
   "Semaglutide regression RR"              = RR_regress,
   "Semaglutide progression RR"             = RR_progress,
-  "Transition probabilities (0.75x-1.25x)" = 1.0,
+  "Fibrosis progression (0.75x-1.25x)"     = 1.0,
+  "Fibrosis regression (0.75x-1.25x)"      = 1.0,
   "State medical costs (0.75x-1.25x)"      = 1.0,
   "Semaglutide annual cost"                = cost_sema_base,
-  "Health state utilities (0.9x-1.1x)"     = 1.0,
+  "Utility decrements (0.9x-1.1x)"         = 1.0,
   "Discount rate"                          = 0.03,
   "DCC->Death (annual)"                    = 0.20,
   "HCC->Death (annual)"                    = 0.1305,
@@ -271,11 +276,11 @@ thresh_all_strats <- lapply(names(frontier_strats), function(strat_name) {
       run_owsa_icer(rr_progress_vec = pv, treat_dur_cycles_vec = dur_cyc, treat_start_cycles = start_cyc)
     })
 
-  results[["h_F3_F4"]] <- find_threshold(
-    "F3->F4 annual hazard", prob_to_rate(p_prog_month$F3_F4) * 12, 0.01, 0.30,
+  results[["p_F3_F4"]] <- find_threshold(
+    "F3->F4 annual probability", candidate_sets[[best]][["F3_F4"]], 0.01, 0.30,
     run_fn = function(x) {
-      pm <- p_prog_month; pm$F3_F4 <- annual_to_month(x)
-      run_owsa_icer(p_prog_month_local = pm, treat_dur_cycles_vec = dur_cyc, treat_start_cycles = start_cyc)
+      pm <- p_prog_cycle; pm$F3_F4 <- annual_to_cycle(x)
+      run_owsa_icer(p_prog_cycle_local = pm, treat_dur_cycles_vec = dur_cyc, treat_start_cycles = start_cyc)
     })
 
   results[["state_cost"]] <- find_threshold(

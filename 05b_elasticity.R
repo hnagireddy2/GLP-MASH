@@ -3,7 +3,7 @@
 #           source("01_model_functions.R"), source("02_calibration.R")
 #
 # Elasticity = (% change in ICER from -25% to +25%) / (% change in the
-# parameter, i.e. 50%). 
+# parameter from 0.75x to 1.25x base = 50%)
 
 pct_shift   <- 0.25
 base_icer_v <- run_owsa_icer()
@@ -33,17 +33,17 @@ rows[["RR_progress"]] <- elasticity_row("Semaglutide RR: progression", RR_progre
   run_owsa_icer(rr_progress_vec = rv)
 })
 
-###### Fibrosis transitions + advanced-disease hazards (monthly probs) ######
+###### Fibrosis + advanced-disease transitions (per-cycle probabilities) ######
 
 trans_names <- c("F0_F1", "F1_F0", "F1_F2", "F2_F1", "F2_F3", "F3_F2", "F3_F4", "F4_F3",
                  "F3_HCC", "F4_HCC", "F4_DCC", "DCC_HCC", "DCC_LT", "DCC_Death",
                  "HCC_LT", "HCC_Death", "LT_Death", "PostLT_Death")
 
 for (nm in trans_names) {
-  base_p <- p_prog_month[[nm]]
+  base_p <- p_prog_cycle[[nm]]
   rows[[paste0("trans_", nm)]] <- elasticity_row(paste0("Transition: ", nm), base_p, function(x) {
-    pm <- p_prog_month; pm[[nm]] <- x
-    run_owsa_icer(p_prog_month_local = pm)
+    pm <- p_prog_cycle; pm[[nm]] <- x
+    run_owsa_icer(p_prog_cycle_local = pm)
   })
 }
 

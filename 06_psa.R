@@ -29,6 +29,8 @@ generate_psa_params <- function(n_sim) {
     p <- beta_params(mean, se)
     rbeta(n, p$shape1, p$shape2)
   }
+  rbeta_ci  <- function(n, mean, lo, hi) rbeta_se(n, mean, se_from_ci95(lo, hi))
+  rlnorm_ci <- function(n, est, lo, hi) rlnorm(n, log(est), (log(hi) - log(lo)) / (2 * 1.96))
 
   ## Rank-order-preserving correlated sampling
   induce_rank_order <- function(U, tol = 0.001, rho_step = 0.01,
@@ -37,16 +39,16 @@ generate_psa_params <- function(n_sim) {
 
     ## Step 1: minimum sufficient correlation for each pair, independently
     pair_rho <- function(i, j) {
-      best <- 0
+      rho_min <- 1 - rho_step
       for (rho in seq(1 - rho_step, 0, by = -rho_step)) {
         L <- chol(matrix(c(1, rho, rho, 1), 2, 2))
         Y <- matrix(rnorm(n * 2), n, 2) %*% L
         ui <- U[, i]; uj <- U[, j]
         ui[order(Y[, 1])] <- sort(U[, i])
         uj[order(Y[, 2])] <- sort(U[, j])
-        if (mean(ui >= uj) <= tol) best <- rho else break
+        if (mean(ui >= uj) <= tol) rho_min <- rho else break
       }
-      best
+      rho_min
     }
 
     Sigma_raw <- diag(k)
@@ -89,43 +91,42 @@ generate_psa_params <- function(n_sim) {
     U_out
   }
 
-  ## Fibrosis-transition mean/low/high (annual), tied to the Le et al.
-  ## candidate set calibration selected 
-  fib_mean <- candidate_sets[[best]]
-  fib_low  <- candidate_sets[[paste0(best, "_low")]]
-  fib_high <- candidate_sets[[paste0(best, "_high")]]
+  ## Fibrosis rates (cases/100 PY, 95% CI) for the calibrated Le et al. set
+  le_rates_best <- list(trial = le_trial_rates, obs = le_obs_rates)[[best]]
+  rfib <- function(nm) {
+    r <- le_rates_best[le_rates_best$transition == nm, ]
+    rate100_to_p(rlnorm_ci(n_sim, r$rate, r$lo, r$hi))
+  }
 
   df <- data.frame(
 
-    ## TREATMENT EFFECTS (log-normal, SEs from ESSENCE trial cell counts)
-    rr_sema_regress  = rlnorm(n_sim,
-                              meanlog = log(1.6637),
-                              sdlog   = 0.1280),
-    rr_sema_progress = rlnorm(n_sim,
-                              meanlog = log(0.5785),
-                              sdlog   = 0.2116),
+    ## TREATMENT EFFECTS (log-normal, ESSENCE)
+    rr_sema_regress  = rlnorm(n_sim, meanlog = log(RR_regress),  sdlog = SE_ln_RR_regress),
+    rr_sema_progress = rlnorm(n_sim, meanlog = log(RR_progress), sdlog = SE_ln_RR_progress),
 
-    ## FIBROSIS TRANSITION HAZARDS (annual, gamma)
-    h_F0_F1 = rgamma_ci(n_sim, fib_mean["F0_F1"], fib_low["F0_F1"], fib_high["F0_F1"]),
-    h_F1_F0 = rgamma_ci(n_sim, fib_mean["F1_F0"], fib_low["F1_F0"], fib_high["F1_F0"]),
-    h_F1_F2 = rgamma_ci(n_sim, fib_mean["F1_F2"], fib_low["F1_F2"], fib_high["F1_F2"]),
-    h_F2_F1 = rgamma_ci(n_sim, fib_mean["F2_F1"], fib_low["F2_F1"], fib_high["F2_F1"]),
-    h_F2_F3 = rgamma_ci(n_sim, fib_mean["F2_F3"], fib_low["F2_F3"], fib_high["F2_F3"]),
-    h_F3_F2 = rgamma_ci(n_sim, fib_mean["F3_F2"], fib_low["F3_F2"], fib_high["F3_F2"]),
-    h_F3_F4 = rgamma_ci(n_sim, fib_mean["F3_F4"], fib_low["F3_F4"], fib_high["F3_F4"]),
-    h_F4_F3 = rgamma_ci(n_sim, fib_mean["F4_F3"], fib_low["F4_F3"], fib_high["F4_F3"]),
+    ## FIBROSIS TRANSITIONS (annual prob.; log-normal on Le et al. rates)
+    p_F0_F1 = rfib("F0_F1"),
+    p_F1_F0 = rfib("F1_F0"),
+    p_F1_F2 = rfib("F1_F2"),
+    p_F2_F1 = rfib("F2_F1"),
+    p_F2_F3 = rfib("F2_F3"),
+    p_F3_F2 = rfib("F3_F2"),
+    p_F3_F4 = rfib("F3_F4"),
+    p_F4_F3 = rfib("F4_F3"),
 
-    ## Advanced-disease hazards (annual)
-    h_F3_HCC       = rgamma_ci(n_sim, 0.0034, 0.0021, 0.0047),
-    h_F4_HCC       = rgamma_ci(n_sim, 0.0378, 0.0213, 0.0543),
-    h_F4_DCC       = rgamma_ci(n_sim, 0.0659, 0.0400, 0.0918),
-    h_DCC_HCC      = rgamma_ci(n_sim, 0.0378, 0.0213, 0.0543),
-    h_DCC_LT       = rgamma_ci(n_sim, 0.0230, 0.0140, 0.0320),
-    h_DCC_Death    = rgamma_ci(n_sim, 0.20,   0.1216, 0.2784),
-    h_HCC_LT       = rgamma_ci(n_sim, 0.0300, 0.0182, 0.0418),
-    h_HCC_Death    = rgamma_ci(n_sim, 0.1305, 0.1049, 0.1561),
-    h_LT_Death     = rgamma_ci(n_sim, 0.0157, 0.0095, 0.0218),
-    h_PostLT_Death = rgamma_ci(n_sim, 0.040365, 0.031592, 0.049058),
+    ## ADVANCED-DISEASE TRANSITIONS (annual prob., beta)
+    p_F3_HCC       = rbeta_ci(n_sim, nonfib_annual$F3_HCC,       0.0021,   0.0047),
+    p_F4_HCC       = rbeta_ci(n_sim, nonfib_annual$F4_HCC,       0.0213,   0.0543),
+    p_F4_DCC       = rbeta_ci(n_sim, nonfib_annual$F4_DCC,       0.0400,   0.0918),
+    p_DCC_HCC      = rbeta_ci(n_sim, nonfib_annual$DCC_HCC,      0.0213,   0.0543),
+    p_DCC_LT       = rbeta_ci(n_sim, nonfib_annual$DCC_LT,       0.0140,   0.0320),
+    p_DCC_Death    = rbeta_ci(n_sim, nonfib_annual$DCC_Death,    0.1216,   0.2784),
+    p_HCC_LT       = rbeta_ci(n_sim, nonfib_annual$HCC_LT,       0.0182,   0.0418),
+    p_HCC_Death    = rbeta_ci(n_sim, nonfib_annual$HCC_Death,    0.1049,   0.1561),
+    p_PostLT_Death = rbeta_ci(n_sim, nonfib_annual$PostLT_Death, 0.031592, 0.049058),
+
+    ## LT PERIOPERATIVE DEATH (per-cycle prob., beta; ±39.2%)
+    p_LT_Death     = rbeta_ci(n_sim, LT_Death_cycle, 0.0095, 0.0218),
 
     ## STATE COSTS (gamma) 
     cost_F0_F2 = rgamma_ci(n_sim, costs_base["F0"], costs_low["F0"], costs_high["F0"]),
@@ -137,17 +138,17 @@ generate_psa_params <- function(n_sim) {
     ## LT procedure cost (gamma)
     cost_LT = rgamma_ci(n_sim, costs_base["LT"], costs_low["LT"], costs_high["LT"]),
 
-    ## HEALTH STATE UTILITIES (decrement, beta)
-    qdec_F0_F2  = rbeta_se(n_sim, qaly_dec_base["F0"],      qaly_dec_base["F0"]      * 0.10),
-    qdec_F3     = rbeta_se(n_sim, qaly_dec_base["F3"],      qaly_dec_base["F3"]      * 0.10),
-    qdec_F4_CC  = rbeta_se(n_sim, qaly_dec_base["F4_CC"],   qaly_dec_base["F4_CC"]   * 0.10),
-    qdec_DCC    = rbeta_se(n_sim, qaly_dec_base["DCC"],     qaly_dec_base["DCC"]     * 0.10),
-    qdec_HCC    = rbeta_se(n_sim, qaly_dec_base["HCC"],     qaly_dec_base["HCC"]     * 0.10),
-    qdec_LT     = rbeta_se(n_sim, qaly_dec_base["LT"],      qaly_dec_base["LT"]      * 0.10),
-    qdec_PostLT = rbeta_se(n_sim, qaly_dec_base["Post_LT"], qaly_dec_base["Post_LT"] * 0.10)
+    ## UTILITY DECREMENTS (beta; SE = 10% of mean; F3 and F4/CC share one draw)
+    qdec_F0_F2_raw = rbeta_se(n_sim, qaly_dec_base["F0"],  qaly_dec_base["F0"]  * 0.10),
+    qdec_F3_F4_raw = rbeta_se(n_sim, qaly_dec_base["F3"],  qaly_dec_base["F3"]  * 0.10),
+    qdec_DCC_raw   = rbeta_se(n_sim, qaly_dec_base["DCC"], qaly_dec_base["DCC"] * 0.10),
+    qdec_HCC_raw   = rbeta_se(n_sim, qaly_dec_base["HCC"], qaly_dec_base["HCC"] * 0.10),
+    qdec_LT_raw    = rbeta_se(n_sim, qaly_dec_base["LT"],  qaly_dec_base["LT"]  * 0.10),
+    qdec_PostLT    = rbeta_se(n_sim, qaly_dec_base["Post_LT"], qaly_dec_base["Post_LT"] * 0.10)
 
   )
-# Induce rank order (F3 < F4_CC < HCC < DCC) via correlated resampling
+
+  ## Induce rank order: costs F3 < F4_CC < HCC < DCC
   cost_ordered <- induce_rank_order(cbind(df$cost_F3_raw, df$cost_F4_CC_raw,
                                           df$cost_HCC_raw, df$cost_DCC_raw))
   df$cost_F3    <- cost_ordered[, 1]
@@ -155,6 +156,18 @@ generate_psa_params <- function(n_sim) {
   df$cost_HCC   <- cost_ordered[, 3]
   df$cost_DCC   <- cost_ordered[, 4]
   df$cost_F3_raw <- df$cost_F4_CC_raw <- df$cost_HCC_raw <- df$cost_DCC_raw <- NULL
+
+  ## Induce rank order: utility decrements F0-F2 < F3/F4 < DCC < HCC < LT
+  qdec_ordered <- induce_rank_order(cbind(df$qdec_F0_F2_raw, df$qdec_F3_F4_raw,
+                                          df$qdec_DCC_raw, df$qdec_HCC_raw,
+                                          df$qdec_LT_raw))
+  df$qdec_F0_F2 <- qdec_ordered[, 1]
+  df$qdec_F3_F4 <- qdec_ordered[, 2]
+  df$qdec_DCC   <- qdec_ordered[, 3]
+  df$qdec_HCC   <- qdec_ordered[, 4]
+  df$qdec_LT    <- qdec_ordered[, 5]
+  df$qdec_F0_F2_raw <- df$qdec_F3_F4_raw <- df$qdec_DCC_raw <-
+    df$qdec_HCC_raw <- df$qdec_LT_raw <- NULL
 
   return(df)
 }
@@ -170,28 +183,28 @@ run_model_psa_iter_all <- function(psa_row) {
   rr_reg_psa  <- rr_regress;  rr_reg_psa["Semaglutide"]  <- psa_row$rr_sema_regress
   rr_prog_psa <- rr_progress; rr_prog_psa["Semaglutide"] <- psa_row$rr_sema_progress
   
-  amh <- function(p) annual_to_month(pmin(p, 0.999))
+  a2c <- function(p) annual_to_cycle(pmin(p, 0.999))
   
-  p_cycle_psa <- p_prog_month          # seed from base case, then overwrite sampled cells
-  p_cycle_psa$F0_F1     <- amh(psa_row$h_F0_F1)
-  p_cycle_psa$F1_F0     <- amh(psa_row$h_F1_F0)
-  p_cycle_psa$F1_F2     <- amh(psa_row$h_F1_F2)
-  p_cycle_psa$F2_F1     <- amh(psa_row$h_F2_F1)
-  p_cycle_psa$F2_F3     <- amh(psa_row$h_F2_F3)
-  p_cycle_psa$F3_F2     <- amh(psa_row$h_F3_F2)
-  p_cycle_psa$F3_F4     <- amh(psa_row$h_F3_F4)
-  p_cycle_psa$F4_F3     <- amh(psa_row$h_F4_F3)
-  p_cycle_psa$F3_HCC    <- amh(psa_row$h_F3_HCC)
-  p_cycle_psa$F4_HCC    <- amh(psa_row$h_F4_HCC)
-  p_cycle_psa$F4_DCC    <- amh(psa_row$h_F4_DCC)
-  p_cycle_psa$DCC_HCC   <- amh(psa_row$h_DCC_HCC)
-  p_cycle_psa$DCC_LT    <- amh(psa_row$h_DCC_LT)
-  p_cycle_psa$DCC_Death <- amh(psa_row$h_DCC_Death)
-  p_cycle_psa$HCC_LT    <- amh(psa_row$h_HCC_LT)
-  p_cycle_psa$HCC_Death <- amh(psa_row$h_HCC_Death)
-  # LT_Death is a one-time cumulative probability 
-  p_cycle_psa$LT_Death  <- pmin(psa_row$h_LT_Death, 0.999)
-  p_cycle_psa$PostLT_Death <- amh(psa_row$h_PostLT_Death)
+  p_cycle_psa <- p_prog_cycle          # start from base case, then overwrite sampled cells
+  p_cycle_psa$F0_F1     <- a2c(psa_row$p_F0_F1)
+  p_cycle_psa$F1_F0     <- a2c(psa_row$p_F1_F0)
+  p_cycle_psa$F1_F2     <- a2c(psa_row$p_F1_F2)
+  p_cycle_psa$F2_F1     <- a2c(psa_row$p_F2_F1)
+  p_cycle_psa$F2_F3     <- a2c(psa_row$p_F2_F3)
+  p_cycle_psa$F3_F2     <- a2c(psa_row$p_F3_F2)
+  p_cycle_psa$F3_F4     <- a2c(psa_row$p_F3_F4)
+  p_cycle_psa$F4_F3     <- a2c(psa_row$p_F4_F3)
+  p_cycle_psa$F3_HCC    <- a2c(psa_row$p_F3_HCC)
+  p_cycle_psa$F4_HCC    <- a2c(psa_row$p_F4_HCC)
+  p_cycle_psa$F4_DCC    <- a2c(psa_row$p_F4_DCC)
+  p_cycle_psa$DCC_HCC   <- a2c(psa_row$p_DCC_HCC)
+  p_cycle_psa$DCC_LT    <- a2c(psa_row$p_DCC_LT)
+  p_cycle_psa$DCC_Death <- a2c(psa_row$p_DCC_Death)
+  p_cycle_psa$HCC_LT    <- a2c(psa_row$p_HCC_LT)
+  p_cycle_psa$HCC_Death <- a2c(psa_row$p_HCC_Death)
+  # LT_Death is already per-cycle (no conversion)
+  p_cycle_psa$LT_Death  <- pmin(psa_row$p_LT_Death, 0.999)
+  p_cycle_psa$PostLT_Death <- a2c(psa_row$p_PostLT_Death)
   
   cost_vec_psa          <- costs_base
   cost_vec_psa["F0"]    <- psa_row$cost_F0_F2
@@ -210,8 +223,8 @@ run_model_psa_iter_all <- function(psa_row) {
   qdec_psa["F0"]       <- psa_row$qdec_F0_F2
   qdec_psa["F1"]       <- psa_row$qdec_F0_F2
   qdec_psa["F2"]       <- psa_row$qdec_F0_F2
-  qdec_psa["F3"]       <- psa_row$qdec_F3
-  qdec_psa["F4_CC"]    <- psa_row$qdec_F4_CC
+  qdec_psa["F3"]       <- psa_row$qdec_F3_F4
+  qdec_psa["F4_CC"]    <- psa_row$qdec_F3_F4
   qdec_psa["DCC"]      <- psa_row$qdec_DCC
   qdec_psa["HCC"]      <- psa_row$qdec_HCC
   qdec_psa["LT"]       <- psa_row$qdec_LT
@@ -221,7 +234,7 @@ run_model_psa_iter_all <- function(psa_row) {
 
   ## ---- LSM / Age12 / Age18, all three strategies at once ----
   run_three_strategies(rr_reg_psa, rr_prog_psa,
-                       p_prog_month_local   = p_cycle_psa,
+                       p_prog_cycle_local   = p_cycle_psa,
                        util_matrix           = util_mat_psa,
                        cost_vector           = cost_vec_psa,
                        drug_cost_vec         = drug_psa,
@@ -229,13 +242,14 @@ run_model_psa_iter_all <- function(psa_row) {
 }
 
 #############################################################
-##  Multi-Scenario PSA Loop: All Ages × All Durations     ##
-##  NOTE: Each sim runs 8 model calls (2 ages × 4 durations)
-##  n_sim_all is set to 1000                               ##
-##  n_sim = 1000 from PSA above for VOI                   ##
+##  PSA loop: LSM, Sema 72w (Age 12), Sema 72w (Age 18)    ##
+##  n_sim_all = 1000 (also used for VOI)                   ##
 #############################################################
 
 n_sim_all <- 1000
+
+## Seed for reproducibility
+set.seed(20250601)
 
   df_psa_input_all <- generate_psa_params(n_sim_all)
   df_c_all <- as.data.frame(matrix(0, nrow = n_sim_all,

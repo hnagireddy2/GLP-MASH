@@ -101,28 +101,28 @@ ggplot(df_evpi_wtp, aes(x = WTP / 1000, y = EVPI / 1000)) +
 # ---- 4. EVPPI (individual parameters) ----------------------
 v_names_params <- c(
   "rr_sema_regress", "rr_sema_progress",
-  "h_F0_F1", "h_F1_F2", "h_F2_F3", "h_F3_F4", "h_F4_DCC",
-  "h_F1_F0", "h_F2_F1", "h_F3_F2", "h_F4_F3",
-  "h_DCC_Death", "h_HCC_Death", "h_LT_Death", "h_PostLT_Death",
+  "p_F0_F1", "p_F1_F2", "p_F2_F3", "p_F3_F4", "p_F4_DCC",
+  "p_F1_F0", "p_F2_F1", "p_F3_F2", "p_F4_F3",
+  "p_DCC_Death", "p_HCC_Death", "p_LT_Death", "p_PostLT_Death",
   "cost_F0_F2", "cost_F3", "cost_F4_CC", "cost_DCC", "cost_HCC", "cost_LT",
-  "qdec_F0_F2", "qdec_F3", "qdec_F4_CC", "qdec_DCC", "qdec_HCC", "qdec_LT", "qdec_PostLT"
+  "qdec_F0_F2", "qdec_F3_F4", "qdec_DCC", "qdec_HCC", "qdec_LT", "qdec_PostLT"
 )
 
 param_labels_voi <- c(
   rr_sema_regress  = "Sema RR: Regression",
   rr_sema_progress = "Sema RR: Progression",
-  h_F0_F1 = "Hazard F0\u2192F1", h_F1_F2 = "Hazard F1\u2192F2",
-  h_F2_F3 = "Hazard F2\u2192F3", h_F3_F4 = "Hazard F3\u2192F4",
-  h_F4_DCC = "Hazard F4\u2192DCC",
-  h_F1_F0 = "Hazard F1\u2192F0 (reg)", h_F2_F1 = "Hazard F2\u2192F1 (reg)",
-  h_F3_F2 = "Hazard F3\u2192F2 (reg)", h_F4_F3 = "Hazard F4\u2192F3 (reg)",
-  h_DCC_Death = "DCC\u2192Death", h_HCC_Death = "HCC\u2192Death",
-  h_LT_Death = "LT\u2192Death (yr 1)", h_PostLT_Death = "Post-LT\u2192Death",
+  p_F0_F1 = "F0\u2192F1", p_F1_F2 = "F1\u2192F2",
+  p_F2_F3 = "F2\u2192F3", p_F3_F4 = "F3\u2192F4",
+  p_F4_DCC = "F4\u2192DCC",
+  p_F1_F0 = "F1\u2192F0 (reg)", p_F2_F1 = "F2\u2192F1 (reg)",
+  p_F3_F2 = "F3\u2192F2 (reg)", p_F4_F3 = "F4\u2192F3 (reg)",
+  p_DCC_Death = "DCC\u2192Death", p_HCC_Death = "HCC\u2192Death",
+  p_LT_Death = "LT\u2192Death (perioperative)", p_PostLT_Death = "Post-LT\u2192Death",
   cost_F0_F2 = "Cost: F0\u2013F2", cost_F3 = "Cost: F3",
   cost_F4_CC = "Cost: F4/CC", cost_DCC = "Cost: DCC", cost_HCC = "Cost: HCC",
   cost_LT = "Cost: LT",
-  qdec_F0_F2 = "Util dec: F0\u2013F2", qdec_F3 = "Util dec: F3",
-  qdec_F4_CC = "Util dec: F4/CC", qdec_DCC = "Util dec: DCC",
+  qdec_F0_F2 = "Util dec: F0\u2013F2", qdec_F3_F4 = "Util dec: F3/F4",
+  qdec_DCC = "Util dec: DCC",
   qdec_HCC = "Util dec: HCC", qdec_LT = "Util dec: LT",
   qdec_PostLT = "Util dec: Post-LT"
 )
@@ -174,11 +174,11 @@ ggplot(df_evppi, aes(x = Parameter, y = EVPPI)) +
 # ---- 5. EVPPI for Grouped Parameters -----------------------
 param_groups <- list(
   "Sema Treatment Effects" = c("rr_sema_regress", "rr_sema_progress"),
-  "Fibrosis Progression"   = c("h_F0_F1","h_F1_F2","h_F2_F3","h_F3_F4","h_F4_DCC"),
-  "Fibrosis Regression"    = c("h_F1_F0","h_F2_F1","h_F3_F2","h_F4_F3"),
-  "Mortality Hazards"      = c("h_DCC_Death","h_HCC_Death","h_LT_Death","h_PostLT_Death"),
+  "Fibrosis Progression"   = c("p_F0_F1","p_F1_F2","p_F2_F3","p_F3_F4","p_F4_DCC"),
+  "Fibrosis Regression"    = c("p_F1_F0","p_F2_F1","p_F3_F2","p_F4_F3"),
+  "Mortality"              = c("p_DCC_Death","p_HCC_Death","p_LT_Death","p_PostLT_Death"),
   "State Costs"            = c("cost_F0_F2","cost_F3","cost_F4_CC","cost_DCC","cost_HCC","cost_LT"),
-  "Health State Utilities" = c("qdec_F0_F2","qdec_F3","qdec_F4_CC",
+  "Health State Utilities" = c("qdec_F0_F2","qdec_F3_F4",
                                 "qdec_DCC","qdec_HCC","qdec_LT","qdec_PostLT")
 )
 
@@ -231,14 +231,14 @@ ggplot(df_evppi_groups, aes(x = Group, y = EVPPI)) +
 # ---- 6. EVSI -----------------------------------------------
 n0_defaults <- c(
   rr_sema_regress = 400, rr_sema_progress = 400,
-  h_F0_F1 = 2000, h_F1_F2 = 2000, h_F2_F3 = 2000,
-  h_F3_F4 = 2000, h_F4_DCC = 1500,
-  h_F1_F0 = 2000, h_F2_F1 = 2000, h_F3_F2 = 2000, h_F4_F3 = 1500,
-  h_DCC_Death = 800, h_HCC_Death = 800,
-  h_LT_Death = 500, h_PostLT_Death = 500,
+  p_F0_F1 = 2000, p_F1_F2 = 2000, p_F2_F3 = 2000,
+  p_F3_F4 = 2000, p_F4_DCC = 1500,
+  p_F1_F0 = 2000, p_F2_F1 = 2000, p_F3_F2 = 2000, p_F4_F3 = 1500,
+  p_DCC_Death = 800, p_HCC_Death = 800,
+  p_LT_Death = 500, p_PostLT_Death = 500,
   cost_F0_F2 = 300, cost_F3 = 300, cost_F4_CC = 300,
   cost_DCC = 300, cost_HCC = 300, cost_LT = 300,
-  qdec_F0_F2 = 500, qdec_F3 = 500, qdec_F4_CC = 500,
+  qdec_F0_F2 = 500, qdec_F3_F4 = 500,
   qdec_DCC = 300, qdec_HCC = 300, qdec_LT = 300, qdec_PostLT = 200
 )
 
@@ -360,8 +360,8 @@ for (s in seq_along(v_n_rct)) {
 
 ## -- Study B: Natural History Cohort --
 v_sel_nh <- which(v_names_params %in%
-                    c("h_F0_F1","h_F1_F2","h_F2_F3","h_F3_F4","h_F4_DCC",
-                      "h_F1_F0","h_F2_F1","h_F3_F2","h_F4_F3"))
+                    c("p_F0_F1","p_F1_F2","p_F2_F3","p_F3_F4","p_F4_DCC",
+                      "p_F1_F0","p_F2_F1","p_F3_F2","p_F4_F3"))
 n0_nh    <- n0_defaults[v_names_params[v_sel_nh]]
 v_n_nh  <- c(0, 50, 100, 250, 500, 750, 1000, 1500, 2000, 3000, 5000, 7500, 10000)
 

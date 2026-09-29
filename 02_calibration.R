@@ -1,8 +1,8 @@
 # 02_calibration.R
 # Requires: source("00_parameters.R"), source("00b_le_transitions.R"), source("01_model_functions.R")
 # Calibrates fibrosis transition probabilities to ESSENCE placebo data.
-# Outputs: p_prog_month (updated), candidate_sets, best, build_p_prog_from_annual,
-#          p_prog_month_le_low, p_prog_month_le_high 
+# Outputs: p_prog_cycle (updated), candidate_sets, best, build_p_prog_from_annual,
+#          p_cycle_fibprog_low/high, p_cycle_fibreg_low/high
 
 #############################################################
 ####################### CALIBRATION #########################
@@ -29,7 +29,7 @@ hcc_dcc_shared <- c(
   DCC_HCC = nonfib_annual$DCC_HCC
 )
 
-# ---- 3. Fibrosis transition sets (calculated in 001b) ----
+# ---- 3. Fibrosis transition sets (from 00b_le_transitions.R) ----
 
 candidate_sets <- lapply(
   list(obs_low    = le_obs_low,
@@ -41,7 +41,7 @@ candidate_sets <- lapply(
   function(x) c(x, hcc_dcc_shared)
 )
 
-# ---- 4. Convert annual probabilities -> monthly probabilities ----
+# ---- 4. Convert annual probabilities -> per-cycle probabilities ----
 build_p_prog_from_annual <- function(vals_annual, p_prog_template) {
   pp <- p_prog_template  
   for (nm in names(vals_annual)) {
@@ -59,7 +59,7 @@ run_single_start <- function(p_prog_local, start_state,
   aP <- build_a_P(
     rr_reg             = c(LSM = 1, Semaglutide = 1),
     rr_prog            = c(LSM = 1, Semaglutide = 1),
-    p_prog_month_local = p_prog_local,
+    p_prog_cycle_local = p_prog_local,
     treat_dur_cycles   = c(LSM = 0L, Semaglutide = 0L),
     treat_start_cycles = c(LSM = 1L, Semaglutide = 1L)
   )
@@ -111,7 +111,7 @@ results <- data.frame(
 )
 
 for (nm in names(candidate_sets)) {
-  pp  <- build_p_prog_from_annual(candidate_sets[[nm]], p_prog_month)
+  pp  <- build_p_prog_from_annual(candidate_sets[[nm]], p_prog_cycle)
   out <- predict_regression(pp)
   results <- rbind(results, data.frame(
     set        = nm,
@@ -149,18 +149,28 @@ ggplot(results, aes(x = set, y = expected_n)) +
   theme_bw(base_size = 13) +
   theme(plot.margin = margin(5, 60, 5, 5))
 
-# ---- 10. Commit the best candidate set to p_prog_month ----
+# ---- 10. Commit the best candidate set to p_prog_cycle ----
 best_annual <- candidate_sets[[best]]
-p_prog_month <- build_p_prog_from_annual(best_annual, p_prog_month)
+p_prog_cycle <- build_p_prog_from_annual(best_annual, p_prog_cycle)
 
-cat("\nFibrosis transitions in p_prog_month now set to '", best,
+cat("\nFibrosis transitions in p_prog_cycle now set to '", best,
     "' from the calibration.\n", sep = "")
 
 #############################################################
-########### OWSA bounds: Le et al. trial range ##############
+###### OWSA bounds: Le et al. 95% CI, calibrated set ########
 #############################################################
 
-p_prog_month_le_low  <- build_p_prog_from_annual(candidate_sets$trial_low,  p_prog_month)
-p_prog_month_le_high <- build_p_prog_from_annual(candidate_sets$trial_high, p_prog_month)
+fib_prog_names <- c("F0_F1", "F1_F2", "F2_F3", "F3_F4")
+fib_reg_names  <- c("F1_F0", "F2_F1", "F3_F2", "F4_F3")
+le_best_low    <- candidate_sets[[paste0(best, "_low")]]
+le_best_high   <- candidate_sets[[paste0(best, "_high")]]
+
+## Progression bounds (regression held at base)
+p_cycle_fibprog_low  <- build_p_prog_from_annual(le_best_low[fib_prog_names],  p_prog_cycle)
+p_cycle_fibprog_high <- build_p_prog_from_annual(le_best_high[fib_prog_names], p_prog_cycle)
+
+## Regression bounds (progression held at base)
+p_cycle_fibreg_low   <- build_p_prog_from_annual(le_best_low[fib_reg_names],   p_prog_cycle)
+p_cycle_fibreg_high  <- build_p_prog_from_annual(le_best_high[fib_reg_names],  p_prog_cycle)
 
 cat("02_calibration.R complete.\n")
