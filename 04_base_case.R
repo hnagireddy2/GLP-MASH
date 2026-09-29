@@ -13,7 +13,6 @@ res_del <- res_del_full$summary
 traces_imm <- res_imm_full$traces
 traces_del <- res_del_full$traces
 
-## LSM is identical in both runs — deduplicate
 res_combined <- bind_rows(res_imm, res_del) %>%
   mutate(StrategyLabel = case_when(
     Strategy == "LSM"         ~ "LSM",

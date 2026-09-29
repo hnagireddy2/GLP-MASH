@@ -70,7 +70,7 @@ l_psa_all <- make_psa_obj(
   strategies    = all_strat_labels
 )
 
-## Restore readable strategy names (make_psa_obj applies make.names)
+## Restore readable strategy names 
 l_psa_all$strategies <- all_strat_labels
 colnames(l_psa_all$cost) <- colnames(l_psa_all$effectiveness) <- all_strat_labels
 

@@ -21,7 +21,7 @@ v_init_essence <- c(F0 = 0, F1 = 0, F2 = 0.313, F3 = 0.687, F4_CC = 0,
                     DCC = 0, HCC = 0, LT = 0,
                     Post_LT = 0, Dead = 0)
 
-# ---- 2. HCC/DCC transitions (single source: nonfib_annual, 00_parameters.R) ----
+# ---- 2. HCC/DCC transitions (source: nonfib_annual, 00_parameters.R) ----
 hcc_dcc_shared <- c(
   F3_HCC  = nonfib_annual$F3_HCC,
   F4_DCC  = nonfib_annual$F4_DCC,
